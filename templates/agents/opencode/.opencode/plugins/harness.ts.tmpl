@@ -1,0 +1,106 @@
+/**
+ * harness.ts — {{REPO_NAME}}
+ *
+ * OpenCode plugin: enforces architecture boundaries after every file write.
+ * Mirrors the Claude Code PostToolUse hook behaviour.
+ *
+ * Fires on: write, edit, apply_patch tool completions
+ * Output: surfaced in the OpenCode session context
+ *
+ * Docs: https://opencode.ai/docs/plugins/
+ */
+
+export default function (ctx: any) {
+  return {
+    hooks: {
+      /**
+       * Post-write: format → lint → architecture check.
+       * Output is injected into the agent's context window.
+       */
+      "tool.execute.after": async (event: any) => {
+        const tool = event.input?.tool as string | undefined;
+        if (!tool || !["write", "edit", "apply_patch"].includes(tool)) {
+          return;
+        }
+
+        // Resolve file path from tool input
+        const filePath: string | undefined =
+          event.input?.args?.filePath ||
+          event.input?.args?.path ||
+          event.input?.args?.file;
+
+        if (!filePath) return;
+
+        const ext = filePath.split(".").pop() ?? "";
+
+        {{FORMAT_BLOCK_TS}}
+        // Python: if (ext === "py") { await ctx.exec(`ruff format "${filePath}" --quiet`).catch(() => {}); }
+        // TypeScript: if (["ts","tsx"].includes(ext)) { await ctx.exec(`npx prettier --write "${filePath}" --log-level silent`).catch(() => {}); }
+        // Go: if (ext === "go") { await ctx.exec(`gofmt -w "${filePath}"`).catch(() => {}); }
+
+        {{LINT_BLOCK_TS}}
+        // Python:
+        // if (ext === "py") {
+        //   const lint = await ctx.exec(`ruff check "${filePath}" --output-format=text`).catch((e: any) => e);
+        //   if (lint?.stdout) ctx.log(`RUFF LINT ISSUES:\n${lint.stdout}`);
+        // }
+
+        {{ARCH_CHECK_BLOCK_TS}}
+        // Python:
+        // if (ext === "py") {
+        //   const arch = await ctx.exec(`python scripts/check_architecture.py "${filePath}"`).catch((e: any) => e);
+        //   if (arch?.stdout?.includes("BOUNDARY VIOLATION")) {
+        //     ctx.log(`\n${arch.stdout}\nSTOP: Fix the boundary violation before writing more code.\nEach violation includes a REMEDIATION instruction — follow it.`);
+        //   }
+        // }
+      },
+
+      /**
+       * Pre-execution guard: block destructive bash commands.
+       * Throw an error to cancel the operation.
+       */
+      "tool.execute.before": async (event: any) => {
+        const tool = event.input?.tool as string | undefined;
+        if (tool !== "bash") return;
+
+        const command: string = event.input?.args?.command ?? "";
+
+        const DANGEROUS = [
+          /rm\s+-rf\s+\//,
+          /DROP\s+TABLE/i,
+          /DROP\s+DATABASE/i,
+          {{DANGEROUS_PATTERNS_TS}}
+          // /gcloud\s+run.*delete/i,   // Cloud Run
+          // /kubectl\s+delete\s+namespace/i,  // k8s
+        ];
+
+        for (const pattern of DANGEROUS) {
+          if (pattern.test(command)) {
+            throw new Error(
+              `BLOCKED: Dangerous command pattern detected.\n` +
+              `Command: ${command}\n` +
+              `If intentional, run this manually in your terminal.`
+            );
+          }
+        }
+
+        const SECRET_PATTERNS = [
+          /echo.*password/i,
+          /cat.*\.env/,
+          /printenv.*(KEY|SECRET|TOKEN)/i,
+          {{SECRET_PATTERNS_TS}}
+        ];
+
+        for (const pattern of SECRET_PATTERNS) {
+          if (pattern.test(command)) {
+            throw new Error(
+              `BLOCKED: Potential secret exposure.\n` +
+              `Command: ${command}\n` +
+              `See docs/conventions.md#secrets.`
+            );
+          }
+        }
+      },
+    },
+  };
+}

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# .claude/hooks/post_write.sh — {{REPO_NAME}}
+#
+# PostToolUse hook: runs after every Write / Edit / MultiEdit.
+# Output is injected into Claude's context — write actionable messages.
+# Order: fastest checks first so failures surface quickly.
+
+set -euo pipefail
+
+FILE="${1:-}"
+EXT="${FILE##*.}"
+
+# ── 1. Format ─────────────────────────────────────────────────────────────────
+{{FORMAT_BLOCK}}
+# Python:   if [ "$EXT" = "py" ]; then ruff format "$FILE" --quiet 2>&1 || true; fi
+# TypeScript: if [[ "$EXT" =~ ^(ts|tsx)$ ]]; then npx prettier --write "$FILE" --log-level silent 2>&1 || true; fi
+# Go:       if [ "$EXT" = "go" ]; then gofmt -w "$FILE" 2>&1 || true; fi
+# Rust:     if [ "$EXT" = "rs" ]; then rustfmt "$FILE" 2>&1 || true; fi
+
+# ── 2. Lint ───────────────────────────────────────────────────────────────────
+{{LINT_BLOCK}}
+# Python:
+# if [ "$EXT" = "py" ]; then
+#   OUT=$(ruff check "$FILE" --output-format=text 2>&1 || true)
+#   if [ -n "$OUT" ]; then echo "RUFF LINT ISSUES — fix before continuing:"; echo "$OUT"; fi
+# fi
+#
+# TypeScript:
+# if [[ "$EXT" =~ ^(ts|tsx)$ ]]; then
+#   OUT=$(npx eslint "$FILE" 2>&1 || true)
+#   if [ -n "$OUT" ]; then echo "ESLINT ISSUES:"; echo "$OUT"; fi
+# fi
+
+# ── 3. Architecture boundary check ───────────────────────────────────────────
+{{ARCH_CHECK_BLOCK}}
+# Python:
+# if [ "$EXT" = "py" ]; then
+#   OUT=$(python scripts/check_architecture.py "$FILE" 2>&1 || true)
+#   if echo "$OUT" | grep -q "BOUNDARY VIOLATION"; then
+#     echo ""
+#     echo "$OUT"
+#     echo "STOP: Fix the boundary violation before writing more code."
+#     echo "Each violation above includes a REMEDIATION instruction — follow it."
+#   fi
+# fi
+#
+# TypeScript:
+# if [[ "$EXT" =~ ^(ts|tsx)$ ]]; then
+#   OUT=$(npx ts-node scripts/check_architecture.ts "$FILE" 2>&1 || true)
+#   if echo "$OUT" | grep -q "BOUNDARY VIOLATION"; then echo "$OUT"; fi
+# fi
+
+exit 0

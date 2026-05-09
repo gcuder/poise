@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""
+Architecture boundary linter for {{REPO_NAME}}.
+
+Layer model:
+{{LAYER_MODEL_COMMENT}}
+  (dependencies must flow left → right only)
+
+Cross-cutting (importable from any layer): {{CROSS_CUTTING_LIST}}
+
+Every violation prints a REMEDIATION instruction designed to be read
+by both humans and coding agents. The agent can self-correct in the
+same context window turn without consulting a human.
+
+Usage:
+    python scripts/check_architecture.py              # check all files
+    python scripts/check_architecture.py path/to/file.py
+"""
+
+import ast
+import sys
+from pathlib import Path
+
+LAYERS: list[str] = [
+    {{LAYERS_LIST}}
+    # e.g. "schemas", "db", "storage", "pipeline", "services", "api"
+]
+
+CROSS_CUTTING: set[str] = {
+    {{CROSS_CUTTING_SET}}
+    # e.g. "core", "utils", "config"
+}
+
+# Packages that must never appear anywhere in this repo.
+# Format: "package": "reason and what to use instead. See docs/decisions/NNN."
+FORBIDDEN_PACKAGES: dict[str, str] = {
+    {{FORBIDDEN_PACKAGES_DICT}}
+}
+
+# Packages restricted to specific layers.
+RESTRICTED_PACKAGES: dict[str, dict] = {
+    {{RESTRICTED_PACKAGES_DICT}}
+    # Format:
+    # "package": {
+    #     "allowed_layers": {"layer"},
+    #     "remediation": (
+    #         "package must only be imported inside layer/. "
+    #         "Call a function from layer/module.py instead. "
+    #         "See docs/conventions.md#section."
+    #     ),
+    # },
+}
+
+SKIP_DIRS: set[str] = {
+    ".venv", "__pycache__", ".git", "tests", "scripts", "migrations",
+    "node_modules", "dist", "build", ".worktrees",
+}
+
+
+def layer_of(filepath: Path) -> str | None:
+    for layer in LAYERS:
+        if layer in filepath.parts:
+            return layer
+    return None
+
+
+def collect_imports(filepath: Path) -> list[tuple[str, int]]:
+    try:
+        tree = ast.parse(filepath.read_text())
+    except SyntaxError:
+        return []
+    imports: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append((alias.name.split(".")[0], node.lineno))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.append((node.module.split(".")[0], node.lineno))
+    return imports
+
+
+def check_file(filepath: Path) -> list[str]:
+    violations: list[str] = []
+    file_layer = layer_of(filepath)
+
+    for module_root, lineno in collect_imports(filepath):
+
+        # Forbidden packages
+        if module_root in FORBIDDEN_PACKAGES:
+            violations.append(
+                f"BOUNDARY VIOLATION {filepath}:{lineno}\n"
+                f"  Forbidden import: '{module_root}'\n"
+                f"  REMEDIATION: {FORBIDDEN_PACKAGES[module_root]}\n"
+            )
+            continue
+
+        # Restricted packages
+        if module_root in RESTRICTED_PACKAGES:
+            rule = RESTRICTED_PACKAGES[module_root]
+            if file_layer not in rule["allowed_layers"]:
+                violations.append(
+                    f"BOUNDARY VIOLATION {filepath}:{lineno}\n"
+                    f"  '{module_root}' used in layer '{file_layer}', "
+                    f"only allowed in: {sorted(rule['allowed_layers'])}\n"
+                    f"  REMEDIATION: {rule['remediation']}\n"
+                )
+            continue
+
+        # Layer boundary
+        if module_root in CROSS_CUTTING or module_root not in LAYERS:
+            continue
+        if file_layer is None:
+            continue
+
+        imported_idx = LAYERS.index(module_root)
+        file_idx = LAYERS.index(file_layer)
+
+        if imported_idx > file_idx:
+            allowed = LAYERS[:file_idx] + list(CROSS_CUTTING)
+            violations.append(
+                f"BOUNDARY VIOLATION {filepath}:{lineno}\n"
+                f"  '{file_layer}/' imports from '{module_root}/' (downstream).\n"
+                f"  Layer order: {' → '.join(LAYERS)}\n"
+                f"  '{file_layer}/' may only import from: {allowed}\n"
+                f"  REMEDIATION: Move the behaviour '{file_layer}/' needs into a "
+                f"function in a lower layer and import from there. "
+                f"See docs/architecture.md#layer-model.\n"
+            )
+
+    return violations
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        files = [Path(f) for f in sys.argv[1:] if f.endswith(".py")]
+    else:
+        files = [
+            f for f in Path(".").rglob("*.py")
+            if not any(skip in f.parts for skip in SKIP_DIRS)
+        ]
+
+    all_violations: list[str] = []
+    for f in sorted(files):
+        all_violations.extend(check_file(f))
+
+    if all_violations:
+        print("=" * 60)
+        print("ARCHITECTURE BOUNDARY VIOLATIONS")
+        print("=" * 60)
+        for v in all_violations:
+            print(v)
+        print(f"{len(all_violations)} violation(s).")
+        print(
+            "\nEach violation includes a REMEDIATION instruction.\n"
+            "Fix the import. Do not add exceptions to this linter.\n"
+            "If a rule is wrong, open a discussion in docs/decisions/."
+        )
+        return 1
+
+    print(f"✓ Architecture check passed ({len(files)} files).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

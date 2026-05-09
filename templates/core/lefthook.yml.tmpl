@@ -1,0 +1,73 @@
+# lefthook.yml — {{REPO_NAME}}
+# Install: {{LEFTHOOK_INSTALL_CMD}}
+# Feedback layers (fastest → slowest):
+#   post-write hook (ms) → pre-commit (s) → CI (min) → human review (h)
+
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "{{SOURCE_GLOB}}"
+      run: {{FORMAT_CMD}} {staged_files}
+      stage_fixed: true
+
+    lint:
+      glob: "{{SOURCE_GLOB}}"
+      run: {{LINT_CMD}} {staged_files}
+      stage_fixed: true
+
+    architecture:
+      glob: "{{SOURCE_GLOB}}"
+      run: {{CHECK_ARCH_CMD}} {staged_files}
+      fail_text: |
+        Architecture boundary violation.
+        Read the REMEDIATION instruction above and fix the import.
+        Do not bypass this check.
+
+pre-push:
+  commands:
+    typecheck:
+      run: {{TYPECHECK_CMD}}
+      fail_text: "Type errors found. Run: make lint"
+
+    tests:
+      run: {{TEST_CMD}}
+      fail_text: "Tests failed. Run: make test"
+
+    architecture-full:
+      run: {{CHECK_ARCH_CMD}}
+      fail_text: "Architecture violations. Fix all before pushing."
+
+    structural-tests:
+      run: {{STRUCTURAL_TEST_CMD}}
+      fail_text: "Structural tests failed — codebase drifted from architecture model."
+
+# Language defaults:
+#
+# Python:
+#   LEFTHOOK_INSTALL_CMD: brew install lefthook && lefthook install
+#   SOURCE_GLOB:          "*.py"
+#   FORMAT_CMD:           ruff format
+#   LINT_CMD:             ruff check --fix
+#   TYPECHECK_CMD:        mypy --strict .
+#   CHECK_ARCH_CMD:       python scripts/check_architecture.py
+#   TEST_CMD:             pytest tests/ -x -q
+#   STRUCTURAL_TEST_CMD:  pytest tests/test_architecture.py -v
+#
+# TypeScript:
+#   SOURCE_GLOB:          "*.{ts,tsx}"
+#   FORMAT_CMD:           npx prettier --write
+#   LINT_CMD:             npx eslint --fix
+#   TYPECHECK_CMD:        npx tsc --noEmit
+#   CHECK_ARCH_CMD:       npx ts-node scripts/check_architecture.ts
+#   TEST_CMD:             npx jest --bail
+#   STRUCTURAL_TEST_CMD:  npx jest tests/architecture.test.ts
+#
+# Go:
+#   SOURCE_GLOB:          "*.go"
+#   FORMAT_CMD:           gofmt -w
+#   LINT_CMD:             golangci-lint run
+#   TYPECHECK_CMD:        go vet ./...
+#   CHECK_ARCH_CMD:       go run scripts/check_architecture.go
+#   TEST_CMD:             go test ./... -count=1
+#   STRUCTURAL_TEST_CMD:  go test ./tests/architecture/...

@@ -1,0 +1,57 @@
+# Architecture
+
+## Overview
+
+{{REPO_OVERVIEW_PARAGRAPH}}
+
+---
+
+## Layer diagram
+
+```
+{{ASCII_LAYER_DIAGRAM}}
+```
+
+---
+
+## Module responsibilities
+
+| Module | Responsibility | May import from |
+|--------|---------------|-----------------|
+{{MODULE_RESPONSIBILITY_TABLE}}
+<!-- One row per layer. Example:
+| `schemas/` | Pydantic models, type definitions. No internal imports. | (nothing) |
+| `db/`      | ORM models, query helpers.                             | `schemas/`, `core/` |
+| `api/`     | FastAPI routers. No business logic.                    | `services/`, `core/` |
+-->
+
+---
+
+## Cross-cutting modules
+
+These are imported freely by any layer:
+
+| Module | Purpose |
+|--------|---------|
+{{CROSS_CUTTING_TABLE}}
+
+---
+
+## External dependencies
+
+| Service / Package | Purpose | Layer that owns it |
+|---|---|---|
+{{EXTERNAL_DEPENDENCIES_TABLE}}
+
+---
+
+## Boundaries enforced mechanically
+
+The following are caught by `make check-arch` and the post-write hook —
+they are not guidelines:
+
+{{MECHANICAL_BOUNDARIES_LIST}}
+<!-- One bullet per RESTRICTED_PACKAGE and FORBIDDEN_PACKAGE. Example:
+- No `anthropic` imports outside `pipeline/` — use `pipeline/llm.py`
+- No `onnxruntime` anywhere in this repo — use the sidecar service via HTTP
+-->

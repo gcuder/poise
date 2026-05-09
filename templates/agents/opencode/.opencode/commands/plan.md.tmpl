@@ -1,0 +1,22 @@
+---
+description: Create a new execution plan for a complex task.
+---
+
+# Create Execution Plan — {{REPO_NAME}}
+
+Plans are first-class repo artifacts — checked in, versioned, updated as
+work progresses. They survive across agent sessions.
+
+**Create a plan when:** task spans multiple sessions, touches more than
+two modules, requires an architectural decision, or introduces a dependency.
+**Work directly when:** bug fix, single-file change, documentation update.
+
+## Steps
+
+1. Read the task from the user's message.
+2. Read `docs/architecture.md` — which layers are affected?
+3. Read `docs/quality.md` — relevant existing debt?
+4. Read `docs/decisions/` for relevant ADRs.
+5. Create `docs/exec-plans/active/<slug>.md` using the template at
+   `docs/exec-plans/template.md`.
+6. Summarise the approach. Ask the user to confirm before implementing.

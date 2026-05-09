@@ -1,0 +1,45 @@
+---
+description: Garbage collection — scan docs and code for drift. Read-only.
+---
+
+# Sync Docs (Garbage Collection) — {{REPO_NAME}}
+
+Read-only analysis. No code changes. Produce a drift report and stop.
+
+## Steps
+
+1. Read `docs/architecture.md` — the declared module structure.
+
+2. Scan actual top-level directories. List any that are:
+   - Present in code but not in the architecture doc
+   - In the architecture doc but no longer exist
+
+3. Spot-check recently modified files against `docs/conventions.md`:
+   - Are layer boundaries respected?
+   - Are restricted packages only used in their allowed layers?
+   (Layer model: `{{LAYER_MODEL_INLINE}}`)
+
+4. Review `docs/quality.md`:
+   - Are "Recently fixed" items actually fixed?
+   - Are there recurring failure patterns not yet documented?
+
+5. Check `docs/exec-plans/active/`:
+   - Do any plans look complete based on the code?
+
+6. Check `docs/decisions/`:
+   - Do ADRs reference modules/files that still exist?
+
+## Output
+
+```
+## Drift Report — [date]
+
+### Modules not in architecture doc
+### Convention violations spotted
+### quality.md items that are stale
+### Plans that appear complete
+### Broken ADR references
+### Recommended actions (prioritised)
+```
+
+Produce the report. Do not fix anything.

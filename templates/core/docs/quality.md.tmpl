@@ -1,0 +1,51 @@
+# Quality
+
+Current state of the codebase. Update this file when gaps are found or
+fixed. Agents read this before starting work to avoid re-implementing
+known workarounds or ignoring problems that are already tracked.
+
+---
+
+## Known gaps
+
+| Area | Gap | Priority |
+|------|-----|----------|
+| — | — | — |
+
+<!-- Add rows as gaps are discovered. Example:
+| `pipeline/moderation.py` | No fallback if sidecar is unhealthy | High |
+-->
+
+---
+
+## Tech debt
+
+<!-- Add entries as debt is identified. Example:
+- **Settings loading**: secrets loaded eagerly at startup; should be lazy
+  to improve cold-start time on Cloud Run.
+-->
+
+---
+
+## Test coverage gaps
+
+<!-- Add entries as gaps are found. Example:
+- `services/ads.py` — Meta ads pipeline largely untested
+-->
+
+---
+
+## Architecture drift to watch
+
+<!-- Patterns that are starting to drift from the intended model. Example:
+- `services/` has started growing direct DB queries — keep those in `db/`
+-->
+
+---
+
+## Recently fixed
+
+<!-- Move items here when resolved, for reference. Example:
+- ~~`GET /recipes/{id}` signed URL failing for private GCS buckets~~
+  Fixed: service account credentials from Secret Manager.
+-->

@@ -1,0 +1,49 @@
+# Conventions
+
+## Style
+
+- **Formatter**: `{{FORMAT_TOOL}}` (enforced via post-write hook — runs automatically)
+- **Linter**: `{{LINT_TOOL}}`
+- **Types**: `{{TYPECHECK_TOOL}}` — strict mode, no `Any` / untyped returns
+- **Language version**: {{LANGUAGE_VERSION}}
+
+---
+
+## Layer rules
+
+{{LAYER_RULES_WITH_EXAMPLES}}
+<!-- For each RESTRICTED_PACKAGE, write a section with ✅/❌ examples.
+     Example for Python/FastAPI with anthropic restricted to pipeline/:
+
+## LLM calls
+
+All Claude API calls go through `pipeline/`. Never import `anthropic` directly
+in routers or services.
+
+```python
+# ✅ correct
+from pipeline.llm import generate_visual_query
+
+# ❌ wrong — anthropic is not allowed outside pipeline/
+import anthropic
+client = anthropic.Anthropic(...)
+```
+-->
+
+---
+
+## Error handling
+
+{{ERROR_HANDLING_CONVENTIONS}}
+
+---
+
+## Secrets
+
+{{SECRETS_CONVENTIONS}}
+
+---
+
+## Tests
+
+{{TEST_CONVENTIONS}}

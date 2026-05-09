@@ -1,0 +1,63 @@
+# Workflows
+
+## Local development
+
+### Prerequisites
+
+{{PREREQUISITES_LIST}}
+
+### Setup
+
+```bash
+{{SETUP_COMMANDS}}
+```
+
+---
+
+## Testing
+
+```bash
+{{TEST_COMMANDS_WITH_VARIANTS}}
+```
+
+---
+
+## Linting and formatting
+
+```bash
+make lint      # {{LINT_TOOL}} + {{TYPECHECK_TOOL}} (CI-blocking)
+make format    # {{FORMAT_TOOL}} (auto-fix, non-blocking)
+make check-arch  # boundary linter (CI-blocking)
+```
+
+These also run via pre-commit hook (lefthook). The post-write hook runs
+the boundary linter after every file write during agent sessions.
+
+---
+
+## Deploying
+
+```bash
+{{DEPLOY_COMMANDS}}
+```
+
+---
+
+## Adding a new feature
+
+1. Check `docs/architecture.md` — which module owns this?
+2. Check `docs/quality.md` — is there relevant debt to address first?
+3. If the task spans multiple sessions, create a plan: `make plan name=<slug>`
+4. Write a failing test
+5. Implement in the correct module
+6. `make lint && make test && make check-arch`
+7. Open PR — CI must pass before merge
+
+---
+
+## Harness maintenance
+
+```bash
+make gc        # scan docs/code for drift — run monthly or after big changes
+make check-arch  # run after any structural refactor
+```

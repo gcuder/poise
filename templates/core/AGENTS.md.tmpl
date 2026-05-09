@@ -1,0 +1,62 @@
+# {{REPO_NAME}}
+
+{{REPO_ONE_LINE_DESCRIPTION}}
+
+---
+
+## Start here
+
+| Question                           | Read                                          |
+|------------------------------------|-----------------------------------------------|
+| How is this repo structured?       | [docs/architecture.md](docs/architecture.md)  |
+| How do I run / test / deploy?      | [docs/workflows.md](docs/workflows.md)        |
+| What are the coding conventions?   | [docs/conventions.md](docs/conventions.md)    |
+| What is currently being worked on? | [docs/exec-plans/active/](docs/exec-plans/active/) |
+| What features are defined?         | [docs/product-specs/](docs/product-specs/)    |
+| Why was X decided?                 | [docs/decisions/](docs/decisions/)            |
+| What is broken / incomplete?       | [docs/quality.md](docs/quality.md)            |
+
+---
+
+## Layer model (enforced mechanically)
+
+Dependencies must flow strictly forward. No skipping, no reversals.
+
+```
+{{LAYER_MODEL_ARROW_DIAGRAM}}
+```
+
+Cross-cutting (any layer may import): `{{CROSS_CUTTING_LIST}}`
+
+Violations are caught by `{{CHECK_ARCH_CMD}}` and the post-write hook.
+**Error messages include remediation instructions — read and follow them.**
+
+---
+
+## Non-negotiable rules
+
+{{NON_NEGOTIABLE_RULES}}
+<!-- One bullet per RESTRICTED_PACKAGE and FORBIDDEN_PACKAGE. Examples:
+- No {{RESTRICTED_PACKAGE}} imports outside `{{ALLOWED_LAYER}}/`
+- No {{FORBIDDEN_PACKAGE}} anywhere in this repo — use {{ALTERNATIVE}} instead
+-->
+
+---
+
+## Commands
+
+```bash
+{{EXISTING_COMMANDS}}
+{{CHECK_ARCH_CMD}}    # boundary linter — violations include remediation instructions
+{{GC_CMD}}            # garbage collection: scan docs/code for drift
+{{PLAN_CMD}}          # create a new execution plan
+```
+
+---
+
+## Plans
+
+Complex work gets an execution plan in `docs/exec-plans/active/`.
+Simple tasks (single file, one session): work directly.
+
+Completed plans: [docs/exec-plans/completed/](docs/exec-plans/completed/)

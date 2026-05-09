@@ -1,0 +1,158 @@
+"""
+Structural architecture tests for {{REPO_NAME}}.
+
+These tests enforce the layer model in CI — they test the structure of
+the codebase itself, not business logic.
+
+Layer model: {{LAYER_MODEL_INLINE}}
+
+Failures include remediation instructions for self-correction.
+"""
+
+import ast
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).parent.parent
+LAYERS: list[str] = [{{LAYERS_LIST}}]
+CROSS_CUTTING: set[str] = {{{CROSS_CUTTING_SET}}}
+SKIP_DIRS: set[str] = {
+    ".venv", "__pycache__", ".git", "tests", "scripts",
+    "migrations", "node_modules", "dist", ".worktrees",
+}
+
+
+def app_files() -> list[Path]:
+    return [
+        f for f in REPO_ROOT.rglob("*.{{FILE_EXTENSION}}")
+        if not any(s in f.parts for s in SKIP_DIRS)
+    ]
+
+
+def layer_of(filepath: Path) -> str | None:
+    for layer in LAYERS:
+        if layer in filepath.parts:
+            return layer
+    return None
+
+
+def imports_in(filepath: Path) -> list[tuple[str, int]]:
+    try:
+        tree = ast.parse(filepath.read_text())
+    except SyntaxError:
+        return []
+    result: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                result.append((alias.name.split(".")[0], node.lineno))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            result.append((node.module.split(".")[0], node.lineno))
+    return result
+
+
+# ── Layer boundary ─────────────────────────────────────────────────────────
+
+
+def test_no_downstream_imports():
+    """No layer may import from a layer that is downstream of it."""
+    violations: list[str] = []
+    for filepath in app_files():
+        file_layer = layer_of(filepath)
+        if file_layer is None:
+            continue
+        file_idx = LAYERS.index(file_layer)
+        for module_root, lineno in imports_in(filepath):
+            if module_root in CROSS_CUTTING or module_root not in LAYERS:
+                continue
+            if LAYERS.index(module_root) > file_idx:
+                violations.append(
+                    f"\n  {filepath.relative_to(REPO_ROOT)}:{lineno}\n"
+                    f"    '{file_layer}/' → '{module_root}/' (downstream)\n"
+                    f"    Fix: expose behaviour through an intermediate layer.\n"
+                    f"    See docs/architecture.md#layer-model."
+                )
+    assert not violations, (
+        f"\n\nDOWNSTREAM IMPORT VIOLATIONS ({len(violations)} found):"
+        + "".join(violations)
+    )
+
+
+# ── Restricted packages ────────────────────────────────────────────────────
+# The generating agent writes one test per RESTRICTED_PACKAGE using this pattern:
+#
+# def test_{{PACKAGE_SLUG}}_only_in_{{LAYER}}():
+#     """{{PACKAGE}} must only be imported inside {{LAYER}}/."""
+#     violations = []
+#     for filepath in app_files():
+#         if layer_of(filepath) == "{{LAYER}}":
+#             continue
+#         for module_root, lineno in imports_in(filepath):
+#             if module_root == "{{PACKAGE}}":
+#                 violations.append(f"  {filepath.relative_to(REPO_ROOT)}:{lineno}")
+#     assert not violations, (
+#         "\n\nBOUNDARY VIOLATION: {{PACKAGE}} outside {{LAYER}}/\n"
+#         + "\n".join(violations)
+#         + "\n\n  REMEDIATION: {{REMEDIATION_MESSAGE}}"
+#     )
+
+{{RESTRICTED_PACKAGE_TESTS}}
+
+
+# ── Forbidden packages ─────────────────────────────────────────────────────
+# The generating agent writes one test per FORBIDDEN_PACKAGE using this pattern:
+#
+# def test_no_{{PACKAGE_SLUG}}():
+#     """{{PACKAGE}} must not appear anywhere in this repo."""
+#     violations = []
+#     for filepath in app_files():
+#         for module_root, lineno in imports_in(filepath):
+#             if module_root == "{{PACKAGE}}":
+#                 violations.append(f"  {filepath.relative_to(REPO_ROOT)}:{lineno}")
+#     assert not violations, (
+#         "\n\nFORBIDDEN: {{PACKAGE}}\n" + "\n".join(violations)
+#         + "\n\n  REMEDIATION: {{FORBIDDEN_REASON_AND_ALTERNATIVE}}"
+#     )
+
+{{FORBIDDEN_PACKAGE_TESTS}}
+
+
+# ── Linter script ──────────────────────────────────────────────────────────
+
+
+def test_check_architecture_passes():
+    """check_architecture.py must exit 0 on the current codebase."""
+    result = subprocess.run(
+        [sys.executable, "scripts/check_architecture.py"],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, (
+        "\n\nARCHITECTURE LINTER FAILED:\n"
+        + result.stdout + result.stderr
+        + "\n\nFix all violations before merging."
+    )
+
+
+# ── Docs cross-links ───────────────────────────────────────────────────────
+
+
+def test_docs_links_exist():
+    """Markdown links in docs/ must point to files that exist."""
+    import re
+    broken: list[str] = []
+    link_re = re.compile(r'\[.*?\]\(([^)#]+)\)')
+    for md in (REPO_ROOT / "docs").rglob("*.md"):
+        for match in link_re.finditer(md.read_text()):
+            target = match.group(1)
+            if target.startswith("http"):
+                continue
+            if not (md.parent / target).resolve().exists():
+                broken.append(f"  {md.relative_to(REPO_ROOT)} → {target}")
+    assert not broken, (
+        "\n\nBROKEN DOC LINKS:\n" + "\n".join(broken)
+        + "\n\n  REMEDIATION: Update the link or create the missing file."
+        "\n  Stale docs are bugs. See docs/workflows.md."
+    )

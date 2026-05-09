@@ -1,0 +1,66 @@
+# Workflow — {{REPO_NAME}}
+
+This file defines the expected agent workflow for tasks in this repository.
+It is read by Codex and by Symphony (if used as an orchestration layer).
+Update this file when the team's process changes — it is versioned with code.
+
+---
+
+## Starting a task
+
+1. Read `AGENTS.md` — understand the repo structure, layer model, and rules.
+2. Check `docs/exec-plans/active/` — is there an existing plan for this task?
+3. Check `docs/quality.md` — is there relevant known debt?
+4. Check `docs/decisions/` — does this task touch a past architectural decision?
+
+## Planning
+
+If the task spans multiple sessions, touches more than two modules, or
+requires an architectural decision:
+
+- Create an execution plan at `docs/exec-plans/active/<slug>.md`
+- Use the template at `docs/exec-plans/template.md`
+- Record key decisions in the plan's decision log as work progresses
+
+Simple tasks (single file, one session): work directly, no plan needed.
+
+## Implementation
+
+- Respect the layer model: `{{LAYER_MODEL_INLINE}}`
+- Imports must flow strictly forward — no downstream imports, no skipping
+- Cross-cutting modules (`{{CROSS_CUTTING_LIST}}`) may be imported by any layer
+- Restricted packages:
+{{RESTRICTED_PACKAGES_WORKFLOW_LIST}}
+  <!-- One bullet per RESTRICTED_PACKAGE. Example:
+  - `anthropic` — only in `pipeline/`
+  - `google.cloud.storage` — only in `storage/`
+  -->
+
+## Quality checks
+
+Run these before marking a task complete. Do not skip them.
+
+```bash
+make format       # auto-format
+make lint         # linting + type checking
+make test         # full test suite
+make check-arch   # architecture boundary check
+```
+
+If `make check-arch` reports violations, read the REMEDIATION instruction
+in each violation and fix the import before continuing.
+
+## Completing a task
+
+- All quality checks pass
+- If a plan was created: check off completed steps, update the decision log
+- Do **not** open a pull request — the human reviewer will do this
+- If the task addressed known debt: update `docs/quality.md`
+
+## Proof of work
+
+When complete, provide:
+- Summary of what was implemented
+- Which files were changed and why
+- Results of `make test` and `make check-arch`
+- Any decisions made that weren't in the original plan

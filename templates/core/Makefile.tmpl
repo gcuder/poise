@@ -1,0 +1,77 @@
+.PHONY: run test lint format check-arch gc plan deploy help
+
+run:
+	{{RUN_CMD}}
+
+test:
+	{{TEST_CMD}}
+
+lint:
+	{{LINT_CMD}}
+	{{TYPECHECK_CMD}}
+
+format:
+	{{FORMAT_CMD}}
+
+# Boundary linter — every violation includes a remediation instruction
+check-arch:
+	@echo "Checking architecture boundaries..."
+	{{CHECK_ARCH_CMD}}
+	@echo "Running structural tests..."
+	{{STRUCTURAL_TEST_CMD}}
+
+# Garbage collection — scan for docs/code drift
+# Runs a coding agent session with the sync-docs command
+gc:
+	@echo "Running garbage collection pass..."
+	{{GC_AGENT_CMD}} | tee docs/gc-report-$$(date +%Y%m%d).md
+	@echo "Report saved. Review and act on recommendations."
+
+# Create a new execution plan
+plan:
+ifndef name
+	$(error Usage: make plan name=<slug>)
+endif
+	@cp docs/exec-plans/template.md docs/exec-plans/active/$(name).md
+	@echo "Plan created: docs/exec-plans/active/$(name).md"
+
+deploy:
+	{{DEPLOY_CMD}}
+
+help:
+	@echo "{{REPO_NAME}}"
+	@echo ""
+	@echo "Dev:      make run"
+	@echo "Test:     make test"
+	@echo "Quality:  make lint | make format | make check-arch"
+	@echo "Harness:  make gc | make plan name=<slug>"
+	@echo "Deploy:   make deploy"
+
+# Language defaults:
+#
+# Python:
+#   RUN_CMD:             uvicorn app.main:app --reload
+#   TEST_CMD:            pytest tests/ -v
+#   LINT_CMD:            ruff check .
+#   TYPECHECK_CMD:       mypy --strict .
+#   FORMAT_CMD:          ruff format . && ruff check . --fix
+#   CHECK_ARCH_CMD:      python scripts/check_architecture.py
+#   STRUCTURAL_TEST_CMD: pytest tests/test_architecture.py -v
+#   GC_AGENT_CMD:        claude --print "/project:sync-docs"
+#
+# TypeScript:
+#   RUN_CMD:             npx ts-node src/index.ts
+#   TEST_CMD:            npx jest
+#   LINT_CMD:            npx eslint .
+#   TYPECHECK_CMD:       npx tsc --noEmit
+#   FORMAT_CMD:          npx prettier --write .
+#   CHECK_ARCH_CMD:      npx ts-node scripts/check_architecture.ts
+#   STRUCTURAL_TEST_CMD: npx jest tests/architecture.test.ts
+#
+# Go:
+#   RUN_CMD:             go run ./cmd/...
+#   TEST_CMD:            go test ./...
+#   LINT_CMD:            golangci-lint run
+#   TYPECHECK_CMD:       go vet ./...
+#   FORMAT_CMD:          gofmt -w .
+#   CHECK_ARCH_CMD:      go run scripts/check_architecture.go

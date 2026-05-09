@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# .claude/hooks/pre_bash.sh — {{REPO_NAME}}
+#
+# PreToolUse hook: runs before every Bash tool call.
+# Exit 2 = unconditional block. Claude cannot override exit 2.
+# Exit 0 = allow.
+
+set -euo pipefail
+
+COMMAND="${CLAUDE_TOOL_INPUT_COMMAND:-}"
+
+# ── Block universally dangerous patterns ──────────────────────────────────────
+DANGEROUS=(
+  "rm -rf /"
+  "rm -rf \*"
+  "DROP TABLE"
+  "DROP DATABASE"
+  {{DEPLOY_TARGET_DANGEROUS_PATTERNS}}
+  # Cloud Run:  "gcloud run.*delete"
+  # AWS Lambda: "aws lambda delete-function"
+  # k8s:        "kubectl delete namespace"
+  # Vercel:     "vercel remove --yes"
+)
+
+for pattern in "${DANGEROUS[@]}"; do
+  if echo "$COMMAND" | grep -qiE "$pattern"; then
+    echo "BLOCKED: Dangerous pattern detected: '$pattern'"
+    echo "Command: $COMMAND"
+    echo "If intentional, run this manually in your terminal."
+    exit 2
+  fi
+done
+
+# ── Block secret exposure ─────────────────────────────────────────────────────
+SECRET_PATTERNS=(
+  "echo.*password"
+  "cat.*\.env"
+  "printenv.*KEY"
+  "printenv.*SECRET"
+  "printenv.*TOKEN"
+  {{PROJECT_SECRET_ENV_VARS}}
+  # Add project-specific secret var names here, e.g.:
+  # "ANTHROPIC_API_KEY"
+  # "DATABASE_URL"
+)
+
+for pattern in "${SECRET_PATTERNS[@]}"; do
+  if echo "$COMMAND" | grep -qiE "$pattern"; then
+    echo "BLOCKED: Potential secret exposure."
+    echo "Command: $COMMAND"
+    echo "See docs/conventions.md#secrets."
+    exit 2
+  fi
+done
+
+{{EXTRA_BLOCKS}}
+# Add project-specific blocks here. Examples:
+#
+# Production DB guard (Cloud SQL / Postgres):
+# if echo "$COMMAND" | grep -qiE "psql.*production|alembic.*downgrade"; then
+#   echo "BLOCKED: Direct production DB operation."
+#   echo "Use make migrate — see docs/workflows.md."
+#   exit 2
+# fi
+#
+# Prevent wiping GCS buckets:
+# if echo "$COMMAND" | grep -qiE "gsutil rm -r gs://"; then
+#   echo "BLOCKED: Mass GCS delete."
+#   exit 2
+# fi
+
+exit 0
