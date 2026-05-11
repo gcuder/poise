@@ -1,4 +1,4 @@
-# harness
+# poise
 
 > Generate a complete agent harness for any repository, with any coding agent.
 
@@ -63,7 +63,7 @@ can follow to build the harness for your repo.
 
 ```bash
 # Install globally
-cp -r . ~/.claude/skills/harness
+cp -r poise ~/.claude/skills/poise
 
 # In any repo
 claude
@@ -74,7 +74,7 @@ claude
 
 ```bash
 # Install globally (OpenCode reads .claude/skills/ natively)
-cp -r . ~/.claude/skills/harness
+cp -r poise ~/.claude/skills/poise
 
 # In any repo
 opencode
@@ -120,10 +120,12 @@ docs/
 ├── settings.json               # hook registration
 ├── hooks/
 │   ├── post_write.sh           # format → lint → arch check (PostToolUse)
-│   └── pre_bash.sh             # block destructive commands (PreToolUse)
+│   ├── pre_bash.sh             # block destructive commands (PreToolUse)
+│   ├── exit_plan_mode.sh       # auto-write approved plan to docs/exec-plans/active/
+│   └── stop_check_plans.sh     # auto-move fully-checked plans to completed/
 └── commands/
-    ├── sync-docs.md            # /project:sync-docs — garbage collection
-    └── plan.md                 # /project:plan — execution plan creation
+    ├── sync-docs.md            # /sync-docs — garbage collection
+    └── plan.md                 # /plan — manual fallback (plan mode is the default)
 ```
 
 ### Codex adapter
