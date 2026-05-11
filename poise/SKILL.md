@@ -215,8 +215,10 @@ Files:
 - `.claude/settings.json` — hook registration
 - `.claude/hooks/post_write.sh` — format → lint → arch check (PostToolUse)
 - `.claude/hooks/pre_bash.sh` — block destructive commands (PreToolUse)
+- `.claude/hooks/exit_plan_mode.sh` — write approved plan to `docs/exec-plans/active/` (PostToolUse on ExitPlanMode)
+- `.claude/hooks/stop_check_plans.sh` — move fully-checked plans to `docs/exec-plans/completed/` (Stop)
 - `.claude/commands/sync-docs.md` — garbage collection sweep
-- `.claude/commands/plan.md` — execution plan creation
+- `.claude/commands/plan.md` — manual fallback when plan mode isn't used
 
 Adapt `post_write.sh` to `LANGUAGE`:
 - Python: `ruff format` + `ruff check` + `python scripts/check_architecture.py`

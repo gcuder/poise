@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# .claude/hooks/exit_plan_mode.sh — {{REPO_NAME}}
+#
+# PostToolUse hook on ExitPlanMode.
+#
+# ExitPlanMode's tool_input does not carry the plan content — the agent writes
+# the plan to ~/.claude/plans/<session-slug>.md during plan mode, and this hook
+# copies it into the repo as docs/exec-plans/active/<derived-slug>.md.
+#
+# Slug is derived from the plan's first H1 so a refined plan overwrites the
+# same active file (no duplicate <slug>-2.md clutter).
+
+set -euo pipefail
+
+PLANS_DIR="$HOME/.claude/plans"
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+ACTIVE_DIR="$PROJECT_DIR/docs/exec-plans/active"
+
+[ -d "$PLANS_DIR" ] || exit 0
+
+NEWEST=$(ls -t "$PLANS_DIR"/*.md 2>/dev/null | head -1 || true)
+[ -n "$NEWEST" ] && [ -f "$NEWEST" ] || exit 0
+
+# ExitPlanMode fires after the user approves — this can take minutes. Use a
+# generous window to skip only obviously-stale plans from prior sessions.
+MTIME=$(stat -f %m "$NEWEST" 2>/dev/null || stat -c %Y "$NEWEST" 2>/dev/null || echo 0)
+if [ "$(($(date +%s) - MTIME))" -gt 3600 ]; then
+  exit 0
+fi
+
+TITLE=$(grep -m1 '^# ' "$NEWEST" | sed 's/^# //' || true)
+if [ -n "$TITLE" ]; then
+  SLUG=$(printf '%s' "$TITLE" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' \
+    | cut -c1-60)
+fi
+[ -n "${SLUG:-}" ] || SLUG="plan-$(date +%Y%m%d-%H%M%S)"
+
+mkdir -p "$ACTIVE_DIR"
+DEST="$ACTIVE_DIR/$SLUG.md"
+
+{
+  echo "**Status**: active"
+  echo "**Created**: $(date +%F)"
+  echo ""
+  cat "$NEWEST"
+} > "$DEST"
+
+echo "[poise] active plan: docs/exec-plans/active/$SLUG.md"
+exit 0

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# .claude/hooks/stop_check_plans.sh — {{REPO_NAME}}
+#
+# Stop hook: when all checkboxes in an active plan are marked done, move the
+# file to docs/exec-plans/completed/ and prepend a Completed date.
+#
+# Stop fires every turn — this script is idempotent and silent on no-op.
+# It skips files touched within the last 5s to avoid racing with the
+# ExitPlanMode hook that just wrote the active plan.
+
+set -euo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+ACTIVE_DIR="$PROJECT_DIR/docs/exec-plans/active"
+COMPLETED_DIR="$PROJECT_DIR/docs/exec-plans/completed"
+
+[ -d "$ACTIVE_DIR" ] || exit 0
+
+NOW=$(date +%s)
+shopt -s nullglob
+
+for plan in "$ACTIVE_DIR"/*.md; do
+  MTIME=$(stat -f %m "$plan" 2>/dev/null || stat -c %Y "$plan" 2>/dev/null || echo 0)
+  if [ "$((NOW - MTIME))" -lt 5 ]; then
+    continue
+  fi
+
+  UNCHECKED=$(grep -c '^- \[ \]' "$plan" 2>/dev/null) || UNCHECKED=0
+  CHECKED=$(grep -c '^- \[x\]' "$plan" 2>/dev/null) || CHECKED=0
+
+  if [ "$UNCHECKED" = "0" ] && [ "$CHECKED" -gt 0 ]; then
+    mkdir -p "$COMPLETED_DIR"
+    DEST="$COMPLETED_DIR/$(basename "$plan")"
+
+    {
+      echo "**Completed**: $(date +%F)"
+      cat "$plan"
+    } > "$DEST"
+
+    if git -C "$PROJECT_DIR" ls-files --error-unmatch "$plan" >/dev/null 2>&1; then
+      git -C "$PROJECT_DIR" rm -f "$plan" >/dev/null 2>&1 || rm -f "$plan"
+    else
+      rm -f "$plan"
+    fi
+
+    echo "[poise] plan complete: docs/exec-plans/completed/$(basename "$plan")"
+  fi
+done
+
+exit 0
