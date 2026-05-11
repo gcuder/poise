@@ -59,4 +59,10 @@ Violations are caught by `{{CHECK_ARCH_CMD}}` and the post-write hook.
 Complex work gets an execution plan in `docs/exec-plans/active/`.
 Simple tasks (single file, one session): work directly.
 
+**Active plans are created automatically.** When you approve a plan in Claude
+Code's plan mode, the `ExitPlanMode` hook writes it to
+`docs/exec-plans/active/<slug>.md`. When every checkbox in that plan is marked
+`- [x]`, the `Stop` hook moves it to `docs/exec-plans/completed/`. The
+`{{PLAN_CMD}}` command is a manual fallback for agents without plan mode.
+
 Completed plans: [docs/exec-plans/completed/](docs/exec-plans/completed/)

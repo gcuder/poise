@@ -9,6 +9,15 @@
             "command": "bash .claude/hooks/post_write.sh \"$CLAUDE_TOOL_INPUT_FILE_PATH\""
           }
         ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/exit_plan_mode.sh"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -18,6 +27,16 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/pre_bash.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop_check_plans.sh"
           }
         ]
       }
