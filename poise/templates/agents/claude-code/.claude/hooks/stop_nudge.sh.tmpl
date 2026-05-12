@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# .claude/hooks/stop_nudge.sh — {{REPO_NAME}}
+#
+# Stop hook: fires when Claude finishes responding. We check whether the
+# session touched many source files without updating any docs; if so, we
+# print a nudge that Claude will see at the start of the next turn.
+#
+# This is advisory. Exit 0 always — never block.
+
+set -euo pipefail
+
+if [ -x "$(command -v python3)" ]; then
+  python3 scripts/nudge_docs.py
+fi
+
+exit 0

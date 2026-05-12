@@ -85,7 +85,44 @@ Record as `FORBIDDEN_PACKAGES` = list of (package, reason, alternative).
 Test runner (pytest / jest / go test / cargo test), test location,
 test command. Record as `TEST_RUNNER`, `TEST_COMMAND`.
 
-### 1.8 Identify agent(s) in use
+### 1.8 Style invariants
+
+Prompt the user for the four "golden principles" the OpenAI harness
+article describes. Defaults are pre-filled per `LANGUAGE`; the user
+can accept all defaults with one word.
+
+1. **`MAX_FILE_LINES`** — per-file LOC ceiling. Default `400`.
+
+2. **`BANNED_LOGGING_CALLS`** — list of `(regex, label)`. Defaults:
+
+   | Language | Defaults |
+   |---|---|
+   | Python     | `(r"\bprint\s*\(", "print()")` |
+   | TypeScript | `(r"\bconsole\.(log\|debug\|info)\s*\(", "console.*()")` |
+   | Go         | `(r"\bfmt\.Print(ln\|f)?\s*\(", "fmt.Print*()")` |
+   | Rust       | `(r"\bprintln!\s*\(", "println!()")` |
+
+3. **`LOGGER_HINT`** — one sentence telling the agent what to use
+   instead (e.g. `"use logging.getLogger(__name__) with structured fields"`).
+   Default: derive from `LANGUAGE`; ask user to confirm.
+
+4. **`NAMING_RULES`** — optional list of `{"glob", "symbol_regex", "check", "hint"}`.
+   Skip if the user has no naming convention to enforce.
+
+5. **`COMPONENT_RULES`** — optional list of `{"glob", "required", "hint"}`.
+   Skip if the user has no component-structure rule.
+
+Record as `STYLE_INVARIANTS`.
+
+### 1.9 References seed
+
+For each `RESTRICTED_PACKAGE` discovered in §1.5, propose a row for
+`docs/references/README.md` pointing at the package's homepage / SDK
+docs URL. Confirm with the user (they may add/remove rows).
+
+Record as `REFERENCES_SEED_ROWS`.
+
+### 1.10 Identify agent(s) in use
 
 Ask the user which coding agent(s) they use:
 - Claude Code
@@ -96,7 +133,7 @@ Ask the user which coding agent(s) they use:
 
 Record as `AGENTS` = list of agent names.
 
-### 1.9 Confirm before generating
+### 1.11 Confirm before generating
 
 Present this summary and **wait for explicit confirmation**:
 
@@ -117,6 +154,16 @@ Restricted packages:
 
 Forbidden packages:
   {{PACKAGE}} — {{REASON}}
+
+Style invariants:
+  Max file lines:   {{MAX_FILE_LINES}}
+  Banned logging:   {{BANNED_LOGGING_CALLS_SUMMARY}}
+  Logger to use:    {{LOGGER_HINT}}
+  Naming rules:     {{NAMING_RULES_SUMMARY or "(none)"}}
+  Component rules:  {{COMPONENT_RULES_SUMMARY or "(none)"}}
+
+References to seed:
+  {{REFERENCES_SEED_SUMMARY or "(none)"}}
 
 Existing commands:
   test:   {{TEST_CMD}}
@@ -167,6 +214,36 @@ Use: `templates/core/tests/test_architecture.py.tmpl`
 Write one test per restricted package, one per forbidden package.
 Each assertion error must include a remediation instruction.
 
+#### scripts/check_style.py
+Use: `templates/core/scripts/check_style.py.tmpl`
+
+Fill `MAX_FILE_LINES`, `BANNED_LOGGING_CALLS`, `LOGGER_HINT`, and
+(if provided) `NAMING_RULES` and `COMPONENT_RULES` from `STYLE_INVARIANTS`.
+Fill `SOURCE_EXTENSIONS` from `LANGUAGE` (`{".py"}`, `{".ts", ".tsx"}`, etc.).
+
+Every violation must include a `REMEDIATION:` line, same convention as
+`check_architecture.py`.
+
+#### tests/test_style.py
+Use: `templates/core/tests/test_style.py.tmpl`
+
+Write one test per `BANNED_LOGGING_CALL`, one per `NAMING_RULE`, one per
+`COMPONENT_RULE`. If `NAMING_RULES` / `COMPONENT_RULES` are empty, omit
+those test sections (the `{{...}}` blocks become empty).
+
+#### scripts/gc_static.py
+Use: `templates/core/scripts/gc_static.py.tmpl`
+
+Copy as-is — script is language-agnostic. Only `{{REPO_NAME}}` to fill.
+
+#### scripts/nudge_plan.py and scripts/nudge_docs.py
+Use: `templates/core/scripts/nudge_plan.py.tmpl`,
+     `templates/core/scripts/nudge_docs.py.tmpl`
+
+Copy as-is — both scripts are agent-agnostic. Only `{{REPO_NAME}}` to fill.
+These are the shared logic that all three adapters' prompt-time / stop-time
+hooks delegate to. Advisory only — exit 0 always.
+
 #### Makefile
 Use: `templates/core/Makefile.tmpl`
 If a Makefile already exists, add harness targets without removing existing ones.
@@ -182,8 +259,11 @@ dependencies table, cross-cutting section.
 Use: `templates/core/docs/architecture.md.tmpl`
 
 #### docs/conventions.md
-Write from scratch using `LANGUAGE`, `FRAMEWORK`, `RESTRICTED_PACKAGES`.
-Include ✅/❌ code examples for each restricted package boundary.
+Write from scratch using `LANGUAGE`, `FRAMEWORK`, `RESTRICTED_PACKAGES`,
+and `STYLE_INVARIANTS`. Include ✅/❌ code examples for each restricted
+package boundary AND for each enabled style invariant (file size, logging,
+naming, components). The `See docs/conventions.md#…` anchors emitted by
+both linters must resolve to a section in this file.
 Use: `templates/core/docs/conventions.md.tmpl`
 
 #### docs/workflows.md
@@ -199,9 +279,13 @@ Write one ADR for each `FORBIDDEN_PACKAGE` or significant architectural
 constraint discovered in Phase 1. Number sequentially: `001-slug.md`.
 Use: `templates/core/docs/decisions/ADR-template.md`
 
-#### docs/exec-plans/ and docs/product-specs/
-Copy as-is (language-agnostic).
-Sources: `templates/core/docs/exec-plans/`, `templates/core/docs/product-specs/`
+#### docs/exec-plans/, docs/product-specs/, docs/references/
+Copy as-is (language-agnostic). For `references/README.md`, fill
+`{{REFERENCES_SEED_ROWS}}` from `REFERENCES_SEED` recorded in §1.9
+(one row per restricted package, or "(none)" if no seeds).
+Sources: `templates/core/docs/exec-plans/`,
+         `templates/core/docs/product-specs/`,
+         `templates/core/docs/references/`
 
 ---
 
@@ -213,18 +297,21 @@ Source directory: `templates/agents/claude-code/`
 
 Files:
 - `.claude/settings.json` — hook registration
-- `.claude/hooks/post_write.sh` — format → lint → arch check (PostToolUse)
+- `.claude/hooks/post_write.sh` — format → lint → arch check → style check (PostToolUse)
 - `.claude/hooks/pre_bash.sh` — block destructive commands (PreToolUse)
 - `.claude/hooks/exit_plan_mode.sh` — write approved plan to `docs/exec-plans/active/` (PostToolUse on ExitPlanMode)
+- `.claude/hooks/user_prompt_submit.sh` — plan-mode nudge via `nudge_plan.py` (UserPromptSubmit)
 - `.claude/hooks/stop_check_plans.sh` — move fully-checked plans to `docs/exec-plans/completed/` (Stop)
+- `.claude/hooks/stop_nudge.sh` — docs-update nudge via `nudge_docs.py` (Stop)
 - `.claude/commands/sync-docs.md` — garbage collection sweep
 - `.claude/commands/plan.md` — manual fallback when plan mode isn't used
 
-Adapt `post_write.sh` to `LANGUAGE`:
-- Python: `ruff format` + `ruff check` + `python scripts/check_architecture.py`
-- TypeScript: `prettier --write` + `eslint --fix` + `npx ts-node scripts/check_architecture.ts`
-- Go: `gofmt -w` + `golangci-lint run`
-- Rust: `rustfmt` + `cargo clippy`
+Adapt `post_write.sh` to `LANGUAGE`. Each language block chains
+format → lint → arch check → style check:
+- Python: `ruff format` + `ruff check` + `check_architecture.py` + `check_style.py`
+- TypeScript: `prettier --write` + `eslint --fix` + `check_architecture.ts` + `check_style.ts`
+- Go: `gofmt -w` + `golangci-lint run` + arch + style equivalents
+- Rust: `rustfmt` + `cargo clippy` + arch + style equivalents
 
 Also add to `pre_bash.sh` any `DEPLOY_TARGET`-specific dangerous commands.
 
@@ -234,10 +321,17 @@ Source directory: `templates/agents/codex/`
 
 Files:
 - `WORKFLOW.md` — Symphony-compatible workflow definition
+- `.codex/config.toml` — registers UserPromptSubmit + Stop hooks
+- `.codex/hooks/user_prompt_submit.sh` — plan-mode nudge (calls `scripts/nudge_plan.py`)
+- `.codex/hooks/stop_nudge.sh` — docs-update nudge (calls `scripts/nudge_docs.py`)
 
 The WORKFLOW.md documents the agent's expected workflow: read AGENTS.md,
 check exec-plans/active/, implement, run quality checks, do not open PR.
 This file is versioned with the code so teams can evolve it.
+
+The two hooks share logic with the Claude Code adapter via the scripts/
+directory — Codex calls the same `nudge_plan.py` / `nudge_docs.py` so
+behaviour stays consistent across agents.
 
 #### OpenCode
 Generate if `AGENTS` includes OpenCode.
@@ -245,12 +339,18 @@ Source directory: `templates/agents/opencode/`
 
 Files:
 - `.opencode/opencode.json` — instructions config pointing to AGENTS.md
-- `.opencode/plugins/harness.ts` — post-write hooks
+- `.opencode/plugins/harness.ts` — post-write hooks (format → lint → arch → style),
+  plus `session.idle` and best-effort `event`-based nudges that delegate to
+  `scripts/nudge_docs.py` / `scripts/nudge_plan.py`
 - `.opencode/commands/sync-docs.md` — garbage collection
 - `.opencode/commands/plan.md` — execution plan creation
 
 Note: OpenCode natively reads `.claude/skills/` — the harness generator
 skill itself is already available to OpenCode without additional setup.
+
+Note: OpenCode has no first-class `UserPromptSubmit` equivalent. The plan
+nudge is wired to the generic `event` hook on a best-effort basis (see
+`templates/agents/opencode/ADAPTER.md` for the linked upstream issue).
 
 ---
 
@@ -261,24 +361,32 @@ skill itself is already available to OpenCode without additional setup.
 
 {{N}} files created.
 
-Install pre-commit hooks:
+Install pre-commit / post-merge hooks:
   {{HOOK_INSTALL_CMD}}
 
-Run the architecture check (expect violations — they're useful signal):
+Run the architecture + style checks (expect violations — they're useful signal):
   {{CHECK_ARCH_CMD}}
+  {{CHECK_STYLE_CMD}}
+
+Add gc-report ignore:
+  echo "docs/.gc-report-*.md" >> .gitignore
 
 Commit the harness:
-  git add AGENTS.md .claude/ .opencode/ docs/ scripts/ tests/test_architecture.py lefthook.yml Makefile
+  git add AGENTS.md .claude/ .opencode/ docs/ scripts/ tests/ lefthook.yml Makefile .gitignore
   git commit -m "chore: add agent harness"
 
-Run garbage collection whenever docs feel stale:
-  make gc
+Garbage collection:
+  - Lefthook's post-merge hook runs `scripts/gc_static.py` automatically
+    on every merge and writes `docs/.gc-report-YYYYMMDD.md` (gitignored).
+  - Run `/sync-docs` in your agent for the judgment-required passes.
+  - `make gc` runs both.
 
 Known limitations:
 - docs/quality.md is empty — populate it with known debt
 - docs/product-specs/ is empty — add a spec before each new feature
+- docs/references/ is seeded but thin — flesh out per restricted package
 - The layer model was inferred — verify it matches how the team thinks about the code
-- Architecture violations will appear on first check-arch run — this is expected
+- Architecture and style violations will appear on first check run — this is expected
 ```
 
 ---
@@ -288,10 +396,17 @@ Known limitations:
 - **AGENTS.md must stay under 100 lines.** If it's longer, move content to docs/.
 - **Remediation messages are the highest-value output.** A linter that says "violation"
   wastes a context window turn. A linter that says "import from X instead, see docs/Y"
-  enables self-correction in the same turn.
+  enables self-correction in the same turn. This applies to *both* the architecture
+  and style linters — every violation must end in `REMEDIATION: …`.
 - **Infer, don't invent.** The layer model must reflect actual code structure,
-  not an ideal. Violations after the first `check-arch` are expected and useful.
+  not an ideal. Violations after the first `check-arch` / `check-style` are
+  expected and useful.
 - **One ADR per real decision.** Don't write ADRs for obvious things. Write them
   for decisions that will confuse a future agent.
+- **Naming and component rules are opt-in.** If the user has no convention to
+  enforce, leave `NAMING_RULES` / `COMPONENT_RULES` empty — the linter skips
+  the check rather than inventing rules.
+- **gc_static.py exits 0 by default.** Never gate merges on it; it's a report,
+  not a check. The lefthook post-merge hook runs it for visibility, not enforcement.
 - **The harness should feel lightweight.** If anything feels heavy or bureaucratic,
   it belongs in docs/, not in the entry file.

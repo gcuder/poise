@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# .claude/hooks/user_prompt_submit.sh — {{REPO_NAME}}
+#
+# UserPromptSubmit hook: fires before Claude sees the user's prompt.
+# Stdin is a JSON envelope from Claude Code. We forward it to the shared
+# nudge script; any stdout is injected into Claude's context as a system
+# reminder.
+#
+# This is advisory. Exit 0 always — never block the user's prompt.
+
+set -euo pipefail
+
+if [ -x "$(command -v python3)" ]; then
+  python3 scripts/nudge_plan.py
+fi
+
+exit 0

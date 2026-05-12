@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""
+Deterministic doc-gardening sweep for {{REPO_NAME}}.
+
+Read-only. Exits 0 always — this is a *report*, not a gate. The judgment
+parts of doc gardening live in the `/sync-docs` agent command; this script
+covers what can be checked without taste.
+
+Triggers covered:
+  - exec-plans where every checkbox is ticked → suggest moving to completed/
+  - exec-plans older than STALE_PLAN_DAYS → flag
+  - docs/quality.md rows older than STALE_QUALITY_DAYS → flag
+  - broken intra-doc markdown links → flag
+
+Usage:
+    python scripts/gc_static.py                # write report to stdout
+    python scripts/gc_static.py --fail-on-any  # exit 1 if anything flagged
+"""
+
+import re
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).parent.parent
+STALE_PLAN_DAYS: int = 30
+STALE_QUALITY_DAYS: int = 90
+
+DOCS = REPO_ROOT / "docs"
+PLANS_ACTIVE = DOCS / "exec-plans" / "active"
+QUALITY = DOCS / "quality.md"
+
+CHECKBOX_OPEN = re.compile(r"^\s*-\s*\[\s\]", re.MULTILINE)
+CHECKBOX_DONE = re.compile(r"^\s*-\s*\[x\]", re.MULTILINE | re.IGNORECASE)
+DATE_IN_ROW = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+MD_LINK = re.compile(r"\[[^\]]*\]\(([^)#]+)\)")
+
+
+def _age_days(path: Path) -> int:
+    return int((time.time() - path.stat().st_mtime) / 86400)
+
+
+def check_fully_ticked_plans() -> list[str]:
+    if not PLANS_ACTIVE.exists():
+        return []
+    findings: list[str] = []
+    for plan in sorted(PLANS_ACTIVE.glob("*.md")):
+        text = plan.read_text(errors="ignore")
+        if not CHECKBOX_DONE.search(text):
+            continue
+        if CHECKBOX_OPEN.search(text):
+            continue
+        findings.append(
+            f"PLAN_COMPLETE: {plan.relative_to(REPO_ROOT)} — "
+            f"all boxes ticked, move to docs/exec-plans/completed/"
+        )
+    return findings
+
+
+def check_stale_plans() -> list[str]:
+    if not PLANS_ACTIVE.exists():
+        return []
+    findings: list[str] = []
+    for plan in sorted(PLANS_ACTIVE.glob("*.md")):
+        age = _age_days(plan)
+        if age > STALE_PLAN_DAYS:
+            findings.append(
+                f"PLAN_STALE: {plan.relative_to(REPO_ROOT)} — "
+                f"last modified {age} days ago (>{STALE_PLAN_DAYS}d)"
+            )
+    return findings
+
+
+def check_stale_quality() -> list[str]:
+    if not QUALITY.exists():
+        return []
+    findings: list[str] = []
+    today = datetime.utcnow().date()
+    for lineno, line in enumerate(QUALITY.read_text(errors="ignore").splitlines(), 1):
+        match = DATE_IN_ROW.search(line)
+        if not match:
+            continue
+        try:
+            row_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        age = (today - row_date).days
+        if age > STALE_QUALITY_DAYS:
+            findings.append(
+                f"QUALITY_STALE: docs/quality.md:{lineno} — "
+                f"row dated {row_date} ({age}d old, >{STALE_QUALITY_DAYS}d)"
+            )
+    return findings
+
+
+def check_broken_links() -> list[str]:
+    if not DOCS.exists():
+        return []
+    findings: list[str] = []
+    for md in DOCS.rglob("*.md"):
+        for match in MD_LINK.finditer(md.read_text(errors="ignore")):
+            target = match.group(1).strip()
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            resolved = (md.parent / target).resolve()
+            if not resolved.exists():
+                findings.append(
+                    f"BROKEN_LINK: {md.relative_to(REPO_ROOT)} → {target}"
+                )
+    return findings
+
+
+def main() -> int:
+    fail_on_any = "--fail-on-any" in sys.argv
+
+    sections = [
+        ("Completed plans (move to completed/)", check_fully_ticked_plans()),
+        ("Stale plans (mtime)",                  check_stale_plans()),
+        ("Stale quality.md rows",                check_stale_quality()),
+        ("Broken doc links",                     check_broken_links()),
+    ]
+
+    total = sum(len(findings) for _, findings in sections)
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    print(f"# gc_static report — {timestamp}\n")
+    for title, findings in sections:
+        print(f"## {title}")
+        if findings:
+            for f in findings:
+                print(f"- {f}")
+        else:
+            print("- (none)")
+        print()
+
+    print(f"Total findings: {total}")
+    print(
+        "\nThis is the deterministic sweep. Run `/sync-docs` in your agent "
+        "for the judgment-required passes (convention drift, architecture "
+        "vs. code, recurring failure patterns)."
+    )
+
+    return 1 if (fail_on_any and total > 0) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

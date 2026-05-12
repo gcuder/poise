@@ -14,6 +14,7 @@
 | What is currently being worked on? | [docs/exec-plans/active/](docs/exec-plans/active/) |
 | What features are defined?         | [docs/product-specs/](docs/product-specs/)    |
 | Why was X decided?                 | [docs/decisions/](docs/decisions/)            |
+| Where are external docs / runbooks?| [docs/references/](docs/references/)          |
 | What is broken / incomplete?       | [docs/quality.md](docs/quality.md)            |
 
 ---
@@ -41,6 +42,16 @@ Violations are caught by `{{CHECK_ARCH_CMD}}` and the post-write hook.
 - No {{FORBIDDEN_PACKAGE}} anywhere in this repo — use {{ALTERNATIVE}} instead
 -->
 
+### Style invariants (enforced by `{{CHECK_STYLE_CMD}}`)
+
+{{STYLE_INVARIANTS_RULES}}
+<!-- One bullet per enabled invariant. Examples:
+- Files must stay under {{MAX_FILE_LINES}} lines — split along clear seams
+- No bare `print()` / `console.log` — use {{LOGGER_HINT}}
+- {{NAMING_RULE_SUMMARY}} (see docs/conventions.md#naming)
+- {{COMPONENT_RULE_SUMMARY}} (see docs/conventions.md#components)
+-->
+
 ---
 
 ## Commands
@@ -48,6 +59,7 @@ Violations are caught by `{{CHECK_ARCH_CMD}}` and the post-write hook.
 ```bash
 {{EXISTING_COMMANDS}}
 {{CHECK_ARCH_CMD}}    # boundary linter — violations include remediation instructions
+{{CHECK_STYLE_CMD}}   # golden-principle linter (size, logging, naming, components)
 {{GC_CMD}}            # garbage collection: scan docs/code for drift
 {{PLAN_CMD}}          # create a new execution plan
 ```

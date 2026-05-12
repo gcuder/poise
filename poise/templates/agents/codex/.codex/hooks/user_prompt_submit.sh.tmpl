@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# .codex/hooks/user_prompt_submit.sh — {{REPO_NAME}}
+#
+# Codex UserPromptSubmit hook: fires before Codex sees the user's prompt.
+# Stdin is a JSON envelope from Codex; we forward to the shared nudge
+# script. Any stdout is surfaced in the session context.
+#
+# Advisory only — exit 0 always so Codex never refuses the prompt.
+
+set -euo pipefail
+
+if [ -x "$(command -v python3)" ]; then
+  python3 scripts/nudge_plan.py
+fi
+
+exit 0

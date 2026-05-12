@@ -4,6 +4,12 @@ Read-only analysis pass. No code changes. Produce a drift report and stop.
 
 ## Steps
 
+0. **Deterministic baseline.** Run `python scripts/gc_static.py` first.
+   It covers fully-ticked plans, stale plans/quality rows, and broken
+   intra-doc links — anything mechanically checkable. Treat its output
+   as the baseline; the steps below add the judgment-required passes
+   that need taste.
+
 1. Read `docs/architecture.md` — the declared module structure.
 
 2. Scan actual top-level directories. List any that are:
