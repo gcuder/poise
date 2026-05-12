@@ -59,10 +59,11 @@ The SKILL.md is the generator logic. Changes to it affect all agents.
 There is no automated test suite for the generator (it's a prompt, not code).
 Before submitting a PR:
 
-1. Run the generator on a real repo in your target language
-2. Run `make check-arch` on the output
-3. Verify the AGENTS.md is under 100 lines
-4. Verify every violation in `check-arch` output has a REMEDIATION line
+1. Run `make sync` (and restart Codex if you use it) so your edits are picked up by the agent you're testing with.
+2. Run the generator on a real repo in your target language.
+3. Run `make check-arch` on the output.
+4. Verify the AGENTS.md is under 100 lines.
+5. Verify every violation in `check-arch` output has a REMEDIATION line.
 
 ## License
 
