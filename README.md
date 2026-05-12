@@ -34,9 +34,9 @@ tailored to that repo's language, framework, and layer model.
 
 | Agent | Entry file | Hooks | Commands |
 |---|---|---|---|
-| [Claude Code](https://claude.ai/code) | `AGENTS.md` + `CLAUDE.md` | `.claude/settings.json` (PostToolUse / PreToolUse) | `.claude/commands/` |
-| [Codex](https://openai.com/codex) | `AGENTS.md` | `WORKFLOW.md` (Symphony-compatible) | — |
-| [OpenCode](https://opencode.ai) | `AGENTS.md` | `.opencode/plugins/harness.ts` | `.opencode/commands/` |
+| [Claude Code](https://claude.ai/code) | `AGENTS.md` + `CLAUDE.md` | `.claude/settings.json` (PostToolUse / PreToolUse / UserPromptSubmit / Stop) | `.claude/commands/` |
+| [Codex](https://openai.com/codex) | `AGENTS.md` | `.codex/config.toml` (UserPromptSubmit / Stop) + `WORKFLOW.md` (Symphony-compatible) | — |
+| [OpenCode](https://opencode.ai) | `AGENTS.md` | `.opencode/plugins/harness.ts` (tool.execute / session.idle / event) | `.opencode/commands/` |
 
 All agents share the same core harness. Agent-specific files are additive.
 
@@ -59,34 +59,37 @@ can follow to build the harness for your repo.
 
 ## Quickstart
 
-### With Claude Code
-
 ```bash
-# Install globally
-cp -r poise ~/.claude/skills/poise
+git clone https://github.com/gcuder/poise.git
+cd poise
+make install
+```
 
-# In any repo
-claude
+`make install` copies the skill into every supported agent's skills directory in one shot:
+
+- `~/.claude/skills/poise/` — picked up by both **Claude Code** and **OpenCode** (OpenCode reads `.claude/skills/` natively).
+- `~/.codex/skills/poise/` — picked up by **Codex** (honors `$CODEX_HOME` if set). Codex reloads skill metadata on launch only, so **restart Codex** after install.
+
+Then, in any repo:
+
+```
 > generate harness for this repo
 ```
 
-### With OpenCode
+### Updating after a `git pull`
 
 ```bash
-# Install globally (OpenCode reads .claude/skills/ natively)
-cp -r poise ~/.claude/skills/poise
-
-# In any repo
-opencode
-> generate harness for this repo
+make sync          # re-copy into both install dirs, restart Codex if you use it
+make install-check # report which install dirs are in sync, drifted, or missing
+make uninstall     # remove both install dirs (prompts unless FORCE=1)
 ```
 
-### With any agent
+### Using the skill without installing it
 
-Pass `SKILL.md` directly:
+Pass `SKILL.md` directly to any agent:
 
 ```
-Implement the harness generator according to: <contents of SKILL.md>
+Implement the harness generator according to: <contents of poise/SKILL.md>
 ```
 
 ---
