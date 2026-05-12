@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+Plan-mode nudge for {{REPO_NAME}}.
+
+Called by per-agent UserPromptSubmit hooks. Reads a JSON envelope on stdin
+(shape varies per agent; we look for `prompt` / `user_prompt` / `text`
+fields) and prints a brief reminder to stdout when the prompt looks
+multi-step. Stays silent for trivial prompts.
+
+Adapters forward stdout into the agent's context as a system reminder.
+This is a NUDGE, not a gate — exit code is always 0.
+
+Heuristic (cheap, regex-only, never blocks):
+  - multi-step verb (refactor, implement, migrate, rebuild, build, add, ...)
+  - cross-cutting hint (across, throughout, everywhere, all files, codebase)
+  - >= MULTI_FILE_HINT explicit file references
+  - prompt length > LONG_PROMPT_CHARS
+
+Disable for a session by setting POISE_NUDGE_PLAN=0 in the env.
+"""
+
+import json
+import os
+import re
+import sys
+
+MULTI_STEP_VERBS = re.compile(
+    r"\b(refactor|implement|migrate|rewrite|rebuild|redesign|introduce|"
+    r"add (a|the) new|build (a|the) new|set up|overhaul|port)\b",
+    re.IGNORECASE,
+)
+CROSS_CUTTING = re.compile(
+    r"\b(across|throughout|everywhere|all files|whole codebase|every module|"
+    r"all of|each of|wide(-| )?ranging)\b",
+    re.IGNORECASE,
+)
+FILE_REF = re.compile(r"[A-Za-z0-9_./-]+\.(py|ts|tsx|go|rs|java|kt|rb|md|yml|yaml|toml|json)\b")
+
+MULTI_FILE_HINT = 3
+LONG_PROMPT_CHARS = 600
+
+
+def extract_prompt(payload: dict) -> str:
+    for key in ("prompt", "user_prompt", "text", "input", "message"):
+        if isinstance(payload.get(key), str):
+            return payload[key]
+    # Fallback: stringify entire payload — heuristic still works on raw text.
+    return json.dumps(payload)
+
+
+def looks_multi_step(prompt: str) -> bool:
+    if not prompt or len(prompt.strip()) < 40:
+        return False
+    score = 0
+    if MULTI_STEP_VERBS.search(prompt):
+        score += 1
+    if CROSS_CUTTING.search(prompt):
+        score += 1
+    if len(FILE_REF.findall(prompt)) >= MULTI_FILE_HINT:
+        score += 1
+    if len(prompt) > LONG_PROMPT_CHARS:
+        score += 1
+    return score >= 2
+
+
+def main() -> int:
+    if os.environ.get("POISE_NUDGE_PLAN") == "0":
+        return 0
+
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return 0
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = {"prompt": raw}
+
+    prompt = extract_prompt(payload)
+    if not looks_multi_step(prompt):
+        return 0
+
+    print(
+        "POISE_NUDGE: this prompt looks multi-step. "
+        "If you haven't already, consider entering plan mode "
+        "(shift-tab in Claude Code, equivalent in your agent) so the "
+        "exit_plan_mode hook captures the approved plan to "
+        "docs/exec-plans/active/. "
+        "Disable this nudge with POISE_NUDGE_PLAN=0."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

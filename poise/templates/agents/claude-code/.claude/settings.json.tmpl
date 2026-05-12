@@ -31,12 +31,26 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/user_prompt_submit.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "bash .claude/hooks/stop_check_plans.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop_nudge.sh"
           }
         ]
       }

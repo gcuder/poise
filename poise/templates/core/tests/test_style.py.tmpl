@@ -1,0 +1,140 @@
+"""
+Structural style tests for {{REPO_NAME}}.
+
+These tests pin the golden-principle invariants in CI alongside the
+architecture boundary tests. They test structure, not business logic.
+
+Invariants:
+  1. File-size ceiling      ({{MAX_FILE_LINES}} lines)
+  2. Structured logging     (no banned calls)
+  3. Naming conventions     (per glob / regex)
+  4. Component structure    (per glob / required pattern)
+
+Failures include remediation instructions for self-correction.
+"""
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).parent.parent
+MAX_FILE_LINES: int = {{MAX_FILE_LINES}}
+SOURCE_EXTENSIONS: set[str] = {{{SOURCE_EXTENSIONS_SET}}}
+SKIP_DIRS: set[str] = {
+    ".venv", "__pycache__", ".git", "tests", "scripts",
+    "migrations", "node_modules", "dist", ".worktrees",
+}
+
+
+def source_files() -> list[Path]:
+    return [
+        f for f in REPO_ROOT.rglob("*")
+        if f.suffix in SOURCE_EXTENSIONS
+        and not any(s in f.parts for s in SKIP_DIRS)
+    ]
+
+
+# ── File size ──────────────────────────────────────────────────────────────
+
+
+def test_no_file_exceeds_size_ceiling():
+    """No source file may exceed MAX_FILE_LINES lines."""
+    too_large: list[str] = []
+    for filepath in source_files():
+        lines = sum(1 for _ in filepath.open("rb"))
+        if lines > MAX_FILE_LINES:
+            too_large.append(
+                f"\n  {filepath.relative_to(REPO_ROOT)} — {lines} lines "
+                f"(ceiling {MAX_FILE_LINES})"
+            )
+    assert not too_large, (
+        f"\n\nFILE-SIZE VIOLATIONS ({len(too_large)} found):"
+        + "".join(too_large)
+        + "\n\n  REMEDIATION: Split each file along a clear seam — one type "
+        "per file, one concern per module. See docs/conventions.md#file-size."
+    )
+
+
+# ── Structured logging ─────────────────────────────────────────────────────
+# The generating agent writes one test per BANNED_LOGGING_CALL using this pattern:
+#
+# def test_no_{{CALL_SLUG}}():
+#     """{{CALL_LABEL}} is banned — use the project logger."""
+#     pattern = re.compile(r"{{CALL_REGEX}}")
+#     violations = []
+#     for filepath in source_files():
+#         text = filepath.read_text(errors="ignore")
+#         for lineno, line in enumerate(text.splitlines(), 1):
+#             if pattern.search(line):
+#                 violations.append(f"  {filepath.relative_to(REPO_ROOT)}:{lineno}")
+#     assert not violations, (
+#         "\n\nBANNED LOGGING CALL: {{CALL_LABEL}}\n" + "\n".join(violations)
+#         + "\n\n  REMEDIATION: {{LOGGER_HINT}} "
+#         "See docs/conventions.md#structured-logging."
+#     )
+
+{{BANNED_LOGGING_TESTS}}
+
+
+# ── Naming conventions ─────────────────────────────────────────────────────
+# One test per NAMING_RULE — generator emits using this pattern:
+#
+# def test_naming_{{RULE_SLUG}}():
+#     """{{RULE_HINT}}"""
+#     decl_re = re.compile(r"^\s*(class|def)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+#     violations = []
+#     for filepath in source_files():
+#         if not filepath.match("{{RULE_GLOB}}"):
+#             continue
+#         text = filepath.read_text(errors="ignore")
+#         for match in decl_re.finditer(text):
+#             if not re.match(r"{{SYMBOL_REGEX}}", match.group(2)):
+#                 lineno = text[:match.start()].count("\n") + 1
+#                 violations.append(
+#                     f"  {filepath.relative_to(REPO_ROOT)}:{lineno} — {match.group(2)}"
+#                 )
+#     assert not violations, (
+#         "\n\nNAMING VIOLATION: {{RULE_HINT}}\n" + "\n".join(violations)
+#         + "\n\n  REMEDIATION: {{RULE_HINT}}"
+#     )
+
+{{NAMING_TESTS}}
+
+
+# ── Component structure ────────────────────────────────────────────────────
+# One test per COMPONENT_RULE — generator emits using this pattern:
+#
+# def test_component_{{RULE_SLUG}}():
+#     """{{RULE_HINT}}"""
+#     required_re = re.compile(r"{{REQUIRED_PATTERN}}")
+#     violations = []
+#     for filepath in source_files():
+#         if not filepath.match("{{RULE_GLOB}}"):
+#             continue
+#         if not required_re.search(filepath.read_text(errors="ignore")):
+#             violations.append(f"  {filepath.relative_to(REPO_ROOT)}")
+#     assert not violations, (
+#         "\n\nCOMPONENT VIOLATION: {{RULE_HINT}}\n" + "\n".join(violations)
+#         + "\n\n  REMEDIATION: {{RULE_HINT}}"
+#     )
+
+{{COMPONENT_TESTS}}
+
+
+# ── Linter script ──────────────────────────────────────────────────────────
+
+
+def test_check_style_passes():
+    """check_style.py must exit 0 on the current codebase."""
+    result = subprocess.run(
+        [sys.executable, "scripts/check_style.py"],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, (
+        "\n\nSTYLE LINTER FAILED:\n"
+        + result.stdout + result.stderr
+        + "\n\nFix all violations before merging."
+    )

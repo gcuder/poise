@@ -17,12 +17,12 @@ from Top 30 to Top 5 on Terminal Bench. Architecture beats prompting.
 A harness has four layers:
 
 ```
-┌─────────────────────────────────────────────┐
-│  AGENTS.md          table of contents        │ ← what every agent reads first
-│  docs/              architecture, plans, ADRs │ ← on-demand context
-│  boundary linter    remediation messages      │ ← mechanical enforcement
-│  hooks              format → lint → arch      │ ← feedback at write time
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  AGENTS.md       table of contents                        │ ← what every agent reads first
+│  docs/           architecture, plans, ADRs, references    │ ← on-demand context
+│  linters         arch + style with remediation messages   │ ← mechanical enforcement
+│  hooks           format → lint → arch → style + post-merge│ ← feedback at write time
+└──────────────────────────────────────────────────────────┘
 ```
 
 This repo is a **generator** — give it any codebase and it produces a harness
@@ -97,20 +97,28 @@ Implement the harness generator according to: <contents of SKILL.md>
 
 ```
 AGENTS.md                       # 100-line table of contents
-Makefile                        # check-arch, gc, plan targets
-lefthook.yml                    # pre-commit / pre-push quality gates
-scripts/check_architecture.py   # boundary linter with remediation messages
-tests/test_architecture.py      # structural tests enforced in CI
+Makefile                        # check, check-arch, check-style, gc, plan targets
+lefthook.yml                    # pre-commit + pre-push gates, post-merge gc sweep
+scripts/
+├── check_architecture.py       # boundary linter with remediation messages
+├── check_style.py              # golden-principles linter (size, logging, naming, components)
+├── gc_static.py                # deterministic doc-gardening sweep (read-only)
+├── nudge_plan.py               # plan-mode reminder on multi-step prompts
+└── nudge_docs.py               # docs-update reminder when sessions touch many files
+tests/
+├── test_architecture.py        # structural arch tests enforced in CI
+└── test_style.py               # structural style tests enforced in CI
 docs/
 ├── architecture.md             # layer diagram + module responsibilities
-├── conventions.md              # coding patterns with ✅/❌ examples
+├── conventions.md              # coding patterns + style invariants with ✅/❌ examples
 ├── workflows.md                # setup, test, lint, deploy
 ├── quality.md                  # known gaps + tech debt tracker
 ├── decisions/                  # ADRs — one per architectural constraint
 ├── exec-plans/                 # execution plans as repo artifacts
 │   ├── active/
 │   └── completed/
-└── product-specs/              # feature specs before implementation
+├── product-specs/              # feature specs before implementation
+└── references/                 # external docs, runbooks, dashboards
 ```
 
 ### Claude Code adapter
@@ -148,10 +156,12 @@ WORKFLOW.md                     # Symphony-compatible workflow definition
 
 ---
 
-## The boundary linter
+## The linters
 
-The most important output. Every architecture violation includes a
-`REMEDIATION:` line that tells the agent exactly what to do:
+The most important output. Two linters, same shape: every violation ends in
+a `REMEDIATION:` line that tells the agent exactly what to do.
+
+**`check_architecture.py`** — layer boundaries, restricted packages, forbidden packages:
 
 ```
 BOUNDARY VIOLATION api/recipes.py:14
@@ -162,8 +172,47 @@ BOUNDARY VIOLATION api/recipes.py:14
                See docs/architecture.md#layer-model.
 ```
 
-This is not a blocking error message — it's a teaching tool. The agent reads
-it and self-corrects without human intervention.
+**`check_style.py`** — golden-principle invariants the OpenAI article calls out:
+file-size ceiling, banned logging calls, naming conventions, component structure:
+
+```
+STYLE VIOLATION services/recipes.py:412
+  File is 412 lines, ceiling is 400.
+  REMEDIATION: Split this file into smaller modules along a clear seam
+               (one type per file, one concern per module).
+               See docs/conventions.md#file-size.
+```
+
+These aren't blocking error messages — they're teaching tools. The agent reads
+the remediation and self-corrects without human intervention.
+
+## Doc gardening
+
+`/sync-docs` is the deep, judgment-required sweep an agent runs. Its
+deterministic baseline — fully-ticked plans, stale rows, broken doc links —
+is extracted into `scripts/gc_static.py` and run automatically by lefthook
+on every merge, writing a gitignored `docs/.gc-report-YYYYMMDD.md` for the
+next agent session to pick up.
+
+## Nudges
+
+Plan mode and doc updates are human-triggered in every coding agent — you
+can't make Claude Code or Codex enter plan mode on its own. So the harness
+ships two advisory nudges instead of hard gates:
+
+- `nudge_plan.py` is called by each agent's UserPromptSubmit (or closest)
+  hook. If your prompt looks multi-step (refactor / migrate / across the
+  codebase / long), it prints a short reminder to enter plan mode so the
+  approved plan lands in `docs/exec-plans/active/`.
+- `nudge_docs.py` is called by each agent's Stop / `session.idle` hook.
+  If the session touched many source files without updating any docs, it
+  reminds the agent to consider `docs/quality.md`, a new ADR, an exec-plan
+  update, or a conventions example.
+
+Both exit 0 always — they print, they don't block. Disable per session
+with `POISE_NUDGE_PLAN=0` / `POISE_NUDGE_DOCS=0`. The logic lives in
+`scripts/` and is shared across all three agents; per-adapter hook files
+are thin shims.
 
 ---
 

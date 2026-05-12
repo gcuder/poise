@@ -24,6 +24,14 @@ pre-commit:
         Read the REMEDIATION instruction above and fix the import.
         Do not bypass this check.
 
+    style:
+      glob: "{{SOURCE_GLOB}}"
+      run: {{CHECK_STYLE_CMD}} {staged_files}
+      fail_text: |
+        Style / golden-principle violation.
+        Read the REMEDIATION instruction above and fix the code.
+        Do not bypass this check.
+
 pre-push:
   commands:
     typecheck:
@@ -38,9 +46,26 @@ pre-push:
       run: {{CHECK_ARCH_CMD}}
       fail_text: "Architecture violations. Fix all before pushing."
 
+    style-full:
+      run: {{CHECK_STYLE_CMD}}
+      fail_text: "Style violations. Fix all before pushing."
+
     structural-tests:
       run: {{STRUCTURAL_TEST_CMD}}
       fail_text: "Structural tests failed — codebase drifted from architecture model."
+
+    structural-style-tests:
+      run: {{STRUCTURAL_STYLE_TEST_CMD}}
+      fail_text: "Structural style tests failed — codebase drifted from golden principles."
+
+# Post-merge: deterministic doc-gardening sweep.
+# Read-only — exits 0 always so it never blocks merges. The report is
+# tee'd to docs/.gc-report-YYYYMMDD.md (gitignored) so the next agent
+# session can pick it up without re-running the sweep.
+post-merge:
+  commands:
+    gc-static:
+      run: {{GC_STATIC_CMD}} | tee docs/.gc-report-$(date +%Y%m%d).md
 
 # Language defaults:
 #
@@ -50,9 +75,11 @@ pre-push:
 #   FORMAT_CMD:           ruff format
 #   LINT_CMD:             ruff check --fix
 #   TYPECHECK_CMD:        mypy --strict .
-#   CHECK_ARCH_CMD:       python scripts/check_architecture.py
-#   TEST_CMD:             pytest tests/ -x -q
-#   STRUCTURAL_TEST_CMD:  pytest tests/test_architecture.py -v
+#   CHECK_ARCH_CMD:            python scripts/check_architecture.py
+#   CHECK_STYLE_CMD:           python scripts/check_style.py
+#   TEST_CMD:                  pytest tests/ -x -q
+#   STRUCTURAL_TEST_CMD:       pytest tests/test_architecture.py -v
+#   STRUCTURAL_STYLE_TEST_CMD: pytest tests/test_style.py -v
 #
 # TypeScript:
 #   SOURCE_GLOB:          "*.{ts,tsx}"

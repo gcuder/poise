@@ -1,4 +1,4 @@
-.PHONY: run test lint format check-arch gc plan deploy help
+.PHONY: run test lint format check-arch check-style check gc plan deploy help
 
 run:
 	{{RUN_CMD}}
@@ -20,12 +20,24 @@ check-arch:
 	@echo "Running structural tests..."
 	{{STRUCTURAL_TEST_CMD}}
 
-# Garbage collection — scan for docs/code drift
-# Runs a coding agent session with the sync-docs command
+# Style / golden-principles linter (size, logging, naming, components)
+check-style:
+	@echo "Checking style invariants..."
+	{{CHECK_STYLE_CMD}}
+	@echo "Running structural style tests..."
+	{{STRUCTURAL_STYLE_TEST_CMD}}
+
+# Full mechanical check — arch + style. CI should target this.
+check: check-arch check-style
+
+# Garbage collection — deterministic sweep, then agent judgment pass
+# Static sweep is read-only and exits 0 always; the agent command does
+# the parts that require taste.
 gc:
-	@echo "Running garbage collection pass..."
-	{{GC_AGENT_CMD}} | tee docs/gc-report-$$(date +%Y%m%d).md
-	@echo "Report saved. Review and act on recommendations."
+	@echo "Running deterministic gc sweep..."
+	{{GC_STATIC_CMD}} | tee docs/gc-report-$$(date +%Y%m%d).md
+	@echo "Static report saved."
+	@echo "For the judgment-required passes, run /sync-docs in your agent."
 
 # Create a new execution plan
 plan:
@@ -43,7 +55,7 @@ help:
 	@echo ""
 	@echo "Dev:      make run"
 	@echo "Test:     make test"
-	@echo "Quality:  make lint | make format | make check-arch"
+	@echo "Quality:  make lint | make format | make check (arch + style)"
 	@echo "Harness:  make gc | make plan name=<slug>"
 	@echo "Deploy:   make deploy"
 
@@ -55,9 +67,11 @@ help:
 #   LINT_CMD:            ruff check .
 #   TYPECHECK_CMD:       mypy --strict .
 #   FORMAT_CMD:          ruff format . && ruff check . --fix
-#   CHECK_ARCH_CMD:      python scripts/check_architecture.py
-#   STRUCTURAL_TEST_CMD: pytest tests/test_architecture.py -v
-#   GC_AGENT_CMD:        claude --print "/project:sync-docs"
+#   CHECK_ARCH_CMD:           python scripts/check_architecture.py
+#   STRUCTURAL_TEST_CMD:       pytest tests/test_architecture.py -v
+#   CHECK_STYLE_CMD:           python scripts/check_style.py
+#   STRUCTURAL_STYLE_TEST_CMD: pytest tests/test_style.py -v
+#   GC_STATIC_CMD:             python scripts/gc_static.py
 #
 # TypeScript:
 #   RUN_CMD:             npx ts-node src/index.ts

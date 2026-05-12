@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+Style / golden-principles linter for {{REPO_NAME}}.
+
+Enforces four invariants alongside the architecture boundary check:
+  1. File-size ceiling      — no single file over MAX_FILE_LINES.
+  2. Structured logging     — banned bare logging calls, use LOGGER_HINT.
+  3. Naming conventions     — (glob, regex, hint) per rule.
+  4. Component structure    — (glob, required pattern, hint) per rule.
+
+Every violation prints a REMEDIATION instruction designed to be read by
+both humans and coding agents. The agent self-corrects in the same
+context-window turn without consulting a human.
+
+Usage:
+    python scripts/check_style.py              # check all files
+    python scripts/check_style.py path/to/file.{{FILE_EXTENSION}}
+"""
+
+import re
+import sys
+from pathlib import Path
+
+# 1. File size ────────────────────────────────────────────────────────────────
+MAX_FILE_LINES: int = {{MAX_FILE_LINES}}   # e.g. 400
+
+# 2. Logging ──────────────────────────────────────────────────────────────────
+# Regex patterns matched per-line. Generator fills per LANGUAGE.
+BANNED_LOGGING_CALLS: list[tuple[str, str]] = [
+    {{BANNED_LOGGING_CALLS_LIST}}
+    # Format: (regex, what-was-banned). Examples:
+    #   (r"\bprint\s*\(",        "print()"),
+    #   (r"\bconsole\.log\s*\(", "console.log()"),
+    #   (r"\bfmt\.Println\s*\(", "fmt.Println()"),
+]
+LOGGER_HINT: str = "{{LOGGER_HINT}}"
+# Examples:
+#   "use logging.getLogger(__name__).info(...) with structured fields"
+#   "use the shared logger from utils/logger.ts, never console.log"
+
+# 3. Naming ───────────────────────────────────────────────────────────────────
+# Glob-scoped regex checks on filenames + symbol names. Empty list disables.
+NAMING_RULES: list[dict] = [
+    {{NAMING_RULES_LIST}}
+    # Format:
+    # {
+    #     "glob": "schemas/**/*.py",
+    #     "symbol_regex": r"^[A-Z][A-Za-z0-9]*Schema$",
+    #     "check": "class",   # "class" | "function" | "filename"
+    #     "hint": "Pydantic schema classes must end with `Schema`. "
+    #             "See docs/conventions.md#naming.",
+    # },
+]
+
+# 4. Component structure ──────────────────────────────────────────────────────
+# Glob-scoped required-pattern checks. Empty list disables.
+COMPONENT_RULES: list[dict] = [
+    {{COMPONENT_RULES_LIST}}
+    # Format:
+    # {
+    #     "glob": "api/routers/*.py",
+    #     "required": r"router\s*=\s*APIRouter\(",
+    #     "hint": "Router modules must define a top-level `router = APIRouter(...)`. "
+    #             "See docs/conventions.md#routers.",
+    # },
+]
+
+SKIP_DIRS: set[str] = {
+    ".venv", "__pycache__", ".git", "tests", "scripts", "migrations",
+    "node_modules", "dist", "build", ".worktrees",
+}
+
+SOURCE_EXTENSIONS: set[str] = {{{SOURCE_EXTENSIONS_SET}}}
+# e.g. {".py"} for Python, {".ts", ".tsx"} for TypeScript
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _glob_match(filepath: Path, glob: str) -> bool:
+    # Match against repo-relative path so "schemas/**/*.py" works.
+    return any(
+        filepath.match(g) or str(filepath).endswith(g.replace("**/", "/"))
+        for g in [glob]
+    )
+
+
+def check_file_size(filepath: Path) -> list[str]:
+    line_count = sum(1 for _ in filepath.open("rb"))
+    if line_count <= MAX_FILE_LINES:
+        return []
+    return [
+        f"STYLE VIOLATION {filepath}:{line_count}\n"
+        f"  File is {line_count} lines, ceiling is {MAX_FILE_LINES}.\n"
+        f"  REMEDIATION: Split this file into smaller modules along a clear seam "
+        f"(one type per file, one concern per module). "
+        f"See docs/conventions.md#file-size.\n"
+    ]
+
+
+def check_logging(filepath: Path) -> list[str]:
+    if not BANNED_LOGGING_CALLS:
+        return []
+    violations: list[str] = []
+    text = filepath.read_text(errors="ignore")
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        # Ignore comments — best-effort, per-language strip is overkill here.
+        stripped = line.split("#", 1)[0] if filepath.suffix == ".py" else line
+        for pattern, label in BANNED_LOGGING_CALLS:
+            if re.search(pattern, stripped):
+                violations.append(
+                    f"STYLE VIOLATION {filepath}:{lineno}\n"
+                    f"  Banned logging call: {label}\n"
+                    f"  REMEDIATION: {LOGGER_HINT} "
+                    f"See docs/conventions.md#structured-logging.\n"
+                )
+    return violations
+
+
+def check_naming(filepath: Path) -> list[str]:
+    if not NAMING_RULES:
+        return []
+    violations: list[str] = []
+    for rule in NAMING_RULES:
+        if not _glob_match(filepath, rule["glob"]):
+            continue
+        target = rule.get("check", "class")
+        if target == "filename":
+            stem = filepath.stem
+            if not re.match(rule["symbol_regex"], stem):
+                violations.append(
+                    f"STYLE VIOLATION {filepath}:1\n"
+                    f"  Filename '{stem}' does not match {rule['symbol_regex']}.\n"
+                    f"  REMEDIATION: {rule['hint']}\n"
+                )
+            continue
+        # class / function name scan via regex (cheap, no AST round-trip):
+        text = filepath.read_text(errors="ignore")
+        kw = "class" if target == "class" else "def"
+        decl_re = re.compile(rf"^\s*{kw}\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+        for match in decl_re.finditer(text):
+            name = match.group(1)
+            if not re.match(rule["symbol_regex"], name):
+                line_no = text[:match.start()].count("\n") + 1
+                violations.append(
+                    f"STYLE VIOLATION {filepath}:{line_no}\n"
+                    f"  {target.capitalize()} '{name}' does not match "
+                    f"{rule['symbol_regex']}.\n"
+                    f"  REMEDIATION: {rule['hint']}\n"
+                )
+    return violations
+
+
+def check_component(filepath: Path) -> list[str]:
+    if not COMPONENT_RULES:
+        return []
+    violations: list[str] = []
+    text = filepath.read_text(errors="ignore")
+    for rule in COMPONENT_RULES:
+        if not _glob_match(filepath, rule["glob"]):
+            continue
+        if not re.search(rule["required"], text):
+            violations.append(
+                f"STYLE VIOLATION {filepath}:1\n"
+                f"  Required pattern missing in component file.\n"
+                f"  REMEDIATION: {rule['hint']}\n"
+            )
+    return violations
+
+
+def check_file(filepath: Path) -> list[str]:
+    violations: list[str] = []
+    violations.extend(check_file_size(filepath))
+    violations.extend(check_logging(filepath))
+    violations.extend(check_naming(filepath))
+    violations.extend(check_component(filepath))
+    return violations
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        files = [Path(f) for f in sys.argv[1:] if Path(f).suffix in SOURCE_EXTENSIONS]
+    else:
+        files = [
+            f for f in Path(".").rglob("*")
+            if f.suffix in SOURCE_EXTENSIONS
+            and not any(skip in f.parts for skip in SKIP_DIRS)
+        ]
+
+    all_violations: list[str] = []
+    for f in sorted(files):
+        all_violations.extend(check_file(f))
+
+    if all_violations:
+        print("=" * 60)
+        print("STYLE / GOLDEN-PRINCIPLE VIOLATIONS")
+        print("=" * 60)
+        for v in all_violations:
+            print(v)
+        print(f"{len(all_violations)} violation(s).")
+        print(
+            "\nEach violation includes a REMEDIATION instruction.\n"
+            "Fix the code. Do not add exceptions to this linter.\n"
+            "If a rule is wrong, open a discussion in docs/decisions/."
+        )
+        return 1
+
+    print(f"✓ Style check passed ({len(files)} files).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

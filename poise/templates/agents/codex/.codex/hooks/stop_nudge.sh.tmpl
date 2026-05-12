@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# .codex/hooks/stop_nudge.sh — {{REPO_NAME}}
+#
+# Codex Stop hook: fires when the agent finishes responding. We forward
+# to the shared nudge_docs script; output is surfaced in the session
+# context so the next turn sees it.
+#
+# Advisory only — exit 0 always.
+
+set -euo pipefail
+
+if [ -x "$(command -v python3)" ]; then
+  python3 scripts/nudge_docs.py
+fi
+
+exit 0

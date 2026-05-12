@@ -49,3 +49,10 @@ Custom commands are defined as markdown files in `.opencode/commands/`. The mark
   may see a violation after writing a file rather than being blocked pre-write
 - For pre-execution blocking, use `tool.execute.before` in the plugin and
   throw an error to cancel the operation (see plugin comments)
+- No clean `UserPromptSubmit` equivalent. The plan-mode nudge is wired
+  to the generic `event` hook and emits via `ctx.log`. Whether the message
+  reaches the model's input depends on the OpenCode version — track
+  [issue #17412](https://github.com/anomalyco/opencode/issues/17412) for
+  first-class support of AI-visible message injection.
+- The Stop nudge uses `session.idle`, which fires when the agent finishes
+  responding — equivalent in timing to Claude Code's `Stop` hook.

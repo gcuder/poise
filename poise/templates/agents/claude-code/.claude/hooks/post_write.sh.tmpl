@@ -50,4 +50,23 @@ EXT="${FILE##*.}"
 #   if echo "$OUT" | grep -q "BOUNDARY VIOLATION"; then echo "$OUT"; fi
 # fi
 
+# ── 4. Style / golden-principles check ───────────────────────────────────────
+{{STYLE_CHECK_BLOCK}}
+# Python:
+# if [ "$EXT" = "py" ]; then
+#   OUT=$(python scripts/check_style.py "$FILE" 2>&1 || true)
+#   if echo "$OUT" | grep -q "STYLE VIOLATION"; then
+#     echo ""
+#     echo "$OUT"
+#     echo "STOP: Fix the style violation before writing more code."
+#     echo "Each violation above includes a REMEDIATION instruction — follow it."
+#   fi
+# fi
+#
+# TypeScript:
+# if [[ "$EXT" =~ ^(ts|tsx)$ ]]; then
+#   OUT=$(npx ts-node scripts/check_style.ts "$FILE" 2>&1 || true)
+#   if echo "$OUT" | grep -q "STYLE VIOLATION"; then echo "$OUT"; fi
+# fi
+
 exit 0

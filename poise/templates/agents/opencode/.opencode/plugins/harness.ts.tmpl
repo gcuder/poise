@@ -53,6 +53,61 @@ export default function (ctx: any) {
         //     ctx.log(`\n${arch.stdout}\nSTOP: Fix the boundary violation before writing more code.\nEach violation includes a REMEDIATION instruction — follow it.`);
         //   }
         // }
+
+        {{STYLE_CHECK_BLOCK_TS}}
+        // Python:
+        // if (ext === "py") {
+        //   const style = await ctx.exec(`python scripts/check_style.py "${filePath}"`).catch((e: any) => e);
+        //   if (style?.stdout?.includes("STYLE VIOLATION")) {
+        //     ctx.log(`\n${style.stdout}\nSTOP: Fix the style violation before writing more code.\nEach violation includes a REMEDIATION instruction — follow it.`);
+        //   }
+        // }
+      },
+
+      /**
+       * Session idle (≈ Claude Code "Stop"): fires when the agent
+       * finishes responding. We call the shared nudge_docs.py to flag
+       * sessions that touched many files without updating any docs.
+       * Advisory only — output goes via ctx.log into the session context.
+       */
+      "session.idle": async () => {
+        try {
+          const out = await ctx.exec("python3 scripts/nudge_docs.py");
+          if (out?.stdout?.trim()) ctx.log(out.stdout);
+        } catch {
+          // Nudges never block — swallow.
+        }
+      },
+
+      /**
+       * Generic event hook: best-effort plan-mode nudge.
+       *
+       * OpenCode does not expose a clean UserPromptSubmit equivalent
+       * (see https://github.com/anomalyco/opencode/issues/17412 for the
+       * upstream feature request to inject AI-visible messages). We
+       * intercept prompt-shaped events here and pipe the prompt text
+       * into the shared nudge_plan.py. Output is logged via ctx.log,
+       * which may or may not be surfaced into the model's input
+       * depending on the OpenCode version.
+       */
+      "event": async (event: any) => {
+        const type: string = event?.type ?? "";
+        if (!/prompt|message|input/i.test(type)) return;
+        const prompt: string =
+          event?.payload?.prompt ??
+          event?.payload?.text ??
+          event?.payload?.message ??
+          "";
+        if (!prompt) return;
+        try {
+          const payload = JSON.stringify({ prompt });
+          const out = await ctx.exec(
+            `printf %s ${JSON.stringify(payload)} | python3 scripts/nudge_plan.py`,
+          );
+          if (out?.stdout?.trim()) ctx.log(out.stdout);
+        } catch {
+          // Best-effort only.
+        }
       },
 
       /**
