@@ -34,8 +34,8 @@ tailored to that repo's language, framework, and layer model.
 
 | Agent | Entry file | Hooks | Commands |
 |---|---|---|---|
-| [Claude Code](https://claude.ai/code) | `AGENTS.md` + `CLAUDE.md` | `.claude/settings.json` (PostToolUse / PreToolUse / UserPromptSubmit / Stop) | `.claude/commands/` |
-| [Codex](https://openai.com/codex) | `AGENTS.md` | `.codex/config.toml` (UserPromptSubmit / Stop) + `WORKFLOW.md` (Symphony-compatible) | — |
+| [Claude Code](https://claude.ai/code) | `AGENTS.md` + `CLAUDE.md` | `.claude/settings.json` (SessionStart / PostToolUse / PreToolUse / UserPromptSubmit / Stop) | `.claude/commands/` |
+| [Codex](https://openai.com/codex) | `AGENTS.md` | `.codex/config.toml` (SessionStart / UserPromptSubmit / Stop) + `WORKFLOW.md` (Symphony-compatible) | — |
 | [OpenCode](https://opencode.ai) | `AGENTS.md` | `.opencode/plugins/harness.ts` (tool.execute / session.idle / event) | `.opencode/commands/` |
 
 All agents share the same core harness. Agent-specific files are additive.
@@ -106,7 +106,10 @@ scripts/
 ├── check_architecture.py       # boundary linter with remediation messages
 ├── check_style.py              # golden-principles linter (size, logging, naming, components)
 ├── gc_static.py                # deterministic doc-gardening sweep (read-only)
-├── nudge_plan.py               # plan-mode reminder on multi-step prompts
+├── _plans.py                   # shared active-plan parser (- [ ] / - [x] convention)
+├── session_brief.py            # SessionStart brief: rules (from AGENTS.md) + active plan
+├── require_plan.py             # plan gate: block multi-file edits until a plan exists
+├── nudge_plan.py               # directive plan reminder + re-surfaces the active plan
 └── nudge_docs.py               # docs-update reminder when sessions touch many files
 tests/
 ├── test_architecture.py        # structural arch tests enforced in CI
@@ -130,10 +133,14 @@ docs/
 .claude/
 ├── settings.json               # hook registration
 ├── hooks/
+│   ├── session_start.sh        # inject harness brief: rules + active plan (SessionStart)
 │   ├── post_write.sh           # format → lint → arch check (PostToolUse)
 │   ├── pre_bash.sh             # block destructive commands (PreToolUse)
+│   ├── pre_write_plan_gate.sh  # block multi-file edits until a plan exists (PreToolUse)
 │   ├── exit_plan_mode.sh       # auto-write approved plan to docs/exec-plans/active/
-│   └── stop_check_plans.sh     # auto-move fully-checked plans to completed/
+│   ├── user_prompt_submit.sh   # plan directive + active-plan re-surface (UserPromptSubmit)
+│   ├── stop_check_plans.sh     # auto-move fully-checked plans to completed/
+│   └── stop_nudge.sh           # docs-update nudge (Stop)
 └── commands/
     ├── sync-docs.md            # /sync-docs — garbage collection
     └── plan.md                 # /plan — manual fallback (plan mode is the default)
@@ -197,25 +204,35 @@ is extracted into `scripts/gc_static.py` and run automatically by lefthook
 on every merge, writing a gitignored `docs/.gc-report-YYYYMMDD.md` for the
 next agent session to pick up.
 
-## Nudges
+## Following the harness
 
-Plan mode and doc updates are human-triggered in every coding agent — you
-can't make Claude Code or Codex enter plan mode on its own. So the harness
-ships two advisory nudges instead of hard gates:
+Generating a harness is easy; getting the agent to *follow* it is the hard
+part. Advisory text alone gets ignored, so poise drives compliance in three
+escalating layers — all sharing logic in `scripts/`, with per-adapter hooks as
+thin shims.
 
-- `nudge_plan.py` is called by each agent's UserPromptSubmit (or closest)
-  hook. If your prompt looks multi-step (refactor / migrate / across the
-  codebase / long), it prints a short reminder to enter plan mode so the
-  approved plan lands in `docs/exec-plans/active/`.
-- `nudge_docs.py` is called by each agent's Stop / `session.idle` hook.
-  If the session touched many source files without updating any docs, it
-  reminds the agent to consider `docs/quality.md`, a new ADR, an exec-plan
-  update, or a conventions example.
+**1. Guaranteed context — the SessionStart brief.** `session_brief.py` runs at
+session start (Claude Code / Codex `SessionStart`; OpenCode best-effort + native
+`AGENTS.md` instructions). It extracts the enforced rules from `AGENTS.md` at
+runtime and lists any active execution plan with its remaining steps, so the
+agent *always* has the rules and the live plan in context — it doesn't have to
+choose to read them. Silence with `POISE_BRIEF=0`.
 
-Both exit 0 always — they print, they don't block. Disable per session
-with `POISE_NUDGE_PLAN=0` / `POISE_NUDGE_DOCS=0`. The logic lives in
-`scripts/` and is shared across all three agents; per-adapter hook files
-are thin shims.
+**2. Directive nudges.** `nudge_plan.py` (UserPromptSubmit / closest) re-surfaces
+the active plan every turn and, for multi-step prompts with no plan, prints an
+imperative instruction to create one *before* editing — no "shift-tab", no
+"consider". `nudge_docs.py` (Stop / `session.idle`) reminds the agent to update
+docs when a session touched many source files and none. Both exit 0 — they
+print, they don't block. Disable with `POISE_NUDGE_PLAN=0` / `POISE_NUDGE_DOCS=0`.
+
+**3. The plan gate (the one hard gate).** `require_plan.py` blocks edits once a
+task touches more than two source files with no plan in `docs/exec-plans/active/`
+— at edit time on Claude Code (`PreToolUse`) and OpenCode (`tool.execute.before`),
+and at commit time everywhere via lefthook (`--staged`, the backstop for Codex).
+Anything under `docs/` is exempt, so small changes and writing the plan itself
+stay frictionless. It's the deliberate exception to the harness's nudges-first
+posture, because the advisory plan nudge alone doesn't change behaviour. Disable
+with `POISE_GATE=0`.
 
 ---
 

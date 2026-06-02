@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""
+Plan gate for {{REPO_NAME}}.
+
+Blocks multi-file source edits until an execution plan exists in
+docs/exec-plans/active/. The harness's own rule: work touching more than
+two modules gets a plan first. Single / two-file changes are never gated.
+
+Two modes:
+  --pretooluse   Edit-time gate. Reads the agent's PreToolUse JSON envelope
+                 on stdin (session_id, tool_input.file_path). Exit 2 with a
+                 remediation on stderr to block the edit; exit 0 to allow.
+                 (Claude Code blocks on exit 2 and feeds stderr to the model;
+                 the OpenCode plugin throws on a non-zero exit.)
+  --staged       Commit-time backstop (lefthook pre-commit). Counts staged
+                 source files; exit 1 with remediation to block the commit;
+                 exit 0 to allow. Agent-agnostic — this is Codex's gate.
+
+Writing the plan itself is never blocked — anything under docs/ and any
+non-source file is exempt, so there is no deadlock.
+
+Disable with POISE_GATE=0.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _plans  # noqa: E402
+
+SOURCE_EXTENSIONS = {".py", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".rb"}
+PLAN_THRESHOLD = 2  # more than this many source files without a plan → block
+
+REMEDIATION = (
+    f"POISE PLAN GATE: this task is editing more than {PLAN_THRESHOLD} source "
+    "files with no execution plan.\n"
+    "Create docs/exec-plans/active/<slug>.md FIRST (enter plan mode / use your "
+    "plan tool / run /plan), then work from it, checking off `- [ ]` steps.\n"
+    "Writing the plan is not blocked. Disable the gate with POISE_GATE=0."
+)
+
+
+def _is_source(path: str) -> bool:
+    p = path.strip().replace("\\", "/")
+    if not p:
+        return False
+    # Never gate docs (the plan lives there) or non-source files.
+    if "docs" in Path(p).parts:
+        return False
+    return Path(p).suffix in SOURCE_EXTENSIONS
+
+
+def _state_path(session_id: str) -> Path:
+    safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
+    return Path(tempfile.gettempdir()) / f"poise-plan-gate-{safe}.json"
+
+
+def _seen_files(session_id: str) -> set[str]:
+    try:
+        data = json.loads(_state_path(session_id).read_text())
+        return set(data) if isinstance(data, list) else set()
+    except (OSError, json.JSONDecodeError, ValueError):
+        return set()
+
+
+def _save_files(session_id: str, files: set[str]) -> None:
+    try:
+        _state_path(session_id).write_text(json.dumps(sorted(files)))
+    except OSError:
+        pass
+
+
+def _block(code: int) -> int:
+    print(REMEDIATION, file=sys.stderr)
+    return code
+
+
+def pretooluse() -> int:
+    try:
+        raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    except (OSError, ValueError):
+        raw = ""
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    tool_input = payload.get("tool_input") or {}
+    file_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    if not _is_source(file_path):
+        return 0
+    if _plans.has_active_plan():
+        return 0
+
+    session_id = str(payload.get("session_id") or "default")
+    seen = _seen_files(session_id)
+    seen.add(os.path.abspath(file_path))
+    _save_files(session_id, seen)
+
+    if len(seen) > PLAN_THRESHOLD:
+        return _block(2)
+    return 0
+
+
+def staged() -> int:
+    if _plans.has_active_plan():
+        return 0
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, check=False,
+        ).stdout
+    except FileNotFoundError:
+        return 0
+    source = [f for f in out.splitlines() if _is_source(f)]
+    if len(source) > PLAN_THRESHOLD:
+        return _block(1)
+    return 0
+
+
+def main() -> int:
+    if os.environ.get("POISE_GATE") == "0":
+        return 0
+    mode = sys.argv[1] if len(sys.argv) > 1 else "--pretooluse"
+    return staged() if mode == "--staged" else pretooluse()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

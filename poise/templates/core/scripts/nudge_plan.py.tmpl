@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-Plan-mode nudge for {{REPO_NAME}}.
+Plan nudge for {{REPO_NAME}}.
 
-Called by per-agent UserPromptSubmit hooks. Reads a JSON envelope on stdin
-(shape varies per agent; we look for `prompt` / `user_prompt` / `text`
-fields) and prints a brief reminder to stdout when the prompt looks
-multi-step. Stays silent for trivial prompts.
+Called by per-agent UserPromptSubmit (or closest) hooks. Reads a JSON
+envelope on stdin (shape varies per agent; we look for `prompt` /
+`user_prompt` / `text` fields). Two jobs, every turn:
 
-Adapters forward stdout into the agent's context as a system reminder.
-This is a NUDGE, not a gate — exit code is always 0.
+  1. If an execution plan is active in docs/exec-plans/active/, re-surface a
+     one-line reminder so the agent keeps working from it and ticking steps.
+  2. Else, if the prompt looks multi-step, direct the agent to create a plan
+     BEFORE editing.
 
-Heuristic (cheap, regex-only, never blocks):
+The message is agent-directed and imperative (no "shift-tab", no "consider")
+because nudges worded as optional get ignored. Adapters forward stdout into
+the agent's context. This is a NUDGE, not a gate — exit code is always 0;
+the hard enforcement lives in require_plan.py.
+
+Multi-step heuristic (cheap, regex-only):
   - multi-step verb (refactor, implement, migrate, rebuild, build, add, ...)
   - cross-cutting hint (across, throughout, everywhere, all files, codebase)
   - >= MULTI_FILE_HINT explicit file references
@@ -23,6 +29,9 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _plans  # noqa: E402
 
 MULTI_STEP_VERBS = re.compile(
     r"\b(refactor|implement|migrate|rewrite|rebuild|redesign|introduce|"
@@ -68,25 +77,29 @@ def main() -> int:
         return 0
 
     raw = sys.stdin.read()
-    if not raw.strip():
-        return 0
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        payload = {"prompt": raw}
+    payload: dict = {}
+    if raw.strip():
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {"prompt": raw}
+    prompt = extract_prompt(payload) if payload else ""
 
-    prompt = extract_prompt(payload)
-    if not looks_multi_step(prompt):
+    # 1. Re-surface an active plan so the agent keeps following it (every turn).
+    active = _plans.summarize_active()
+    if active:
+        print("POISE: " + active)
         return 0
 
-    print(
-        "POISE_NUDGE: this prompt looks multi-step. "
-        "If you haven't already, consider entering plan mode "
-        "(shift-tab in Claude Code, equivalent in your agent) so the "
-        "exit_plan_mode hook captures the approved plan to "
-        "docs/exec-plans/active/. "
-        "Disable this nudge with POISE_NUDGE_PLAN=0."
-    )
+    # 2. No active plan: if the task looks multi-step, direct the agent to make one.
+    if looks_multi_step(prompt):
+        print(
+            "POISE: this task looks multi-step. Before editing any files, produce "
+            "an execution plan and save it to docs/exec-plans/active/<slug>.md "
+            "(enter plan mode / use your plan tool, or run /plan). Do not start "
+            "editing until the plan exists; then work from it, checking off "
+            "`- [ ]` steps as you go. Disable this nudge with POISE_NUDGE_PLAN=0."
+        )
     return 0
 
 

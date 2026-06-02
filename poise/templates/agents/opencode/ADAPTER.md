@@ -5,7 +5,7 @@
 | File | Purpose |
 |------|---------|
 | `.opencode/opencode.json` | Points OpenCode at `AGENTS.md`; sets permissions |
-| `.opencode/plugins/harness.ts` | Post-write hooks: format → lint → arch check |
+| `.opencode/plugins/harness.ts` | Post-write checks, best-effort brief, plan gate, bash guard |
 | `.opencode/commands/sync-docs.md` | `/sync-docs` — garbage collection sweep |
 | `.opencode/commands/plan.md` | `/plan` — guided execution plan creation |
 
@@ -49,10 +49,19 @@ Custom commands are defined as markdown files in `.opencode/commands/`. The mark
   may see a violation after writing a file rather than being blocked pre-write
 - For pre-execution blocking, use `tool.execute.before` in the plugin and
   throw an error to cancel the operation (see plugin comments)
-- No clean `UserPromptSubmit` equivalent. The plan-mode nudge is wired
+- No clean `UserPromptSubmit` equivalent. The plan nudge is wired
   to the generic `event` hook and emits via `ctx.log`. Whether the message
   reaches the model's input depends on the OpenCode version — track
   [issue #17412](https://github.com/anomalyco/opencode/issues/17412) for
   first-class support of AI-visible message injection.
 - The Stop nudge uses `session.idle`, which fires when the agent finishes
   responding — equivalent in timing to Claude Code's `Stop` hook.
+- **No first-class SessionStart event.** The harness brief (rules + active
+  plan) is printed best-effort on the first `event`, guarded by a one-shot
+  flag. The *guaranteed* path for rules on OpenCode is the native
+  `instructions: ["AGENTS.md"]` in `opencode.json` — AGENTS.md carries the
+  "Read before you act" block and the enforced rules, loaded every session.
+- **Plan gate is real here.** `tool.execute.before` runs `require_plan.py`
+  for `write` / `edit` / `apply_patch` and throws to block once a task edits
+  more than two source files with no active plan. Writing the plan (anything
+  under `docs/`) is never blocked. Disable with `POISE_GATE=0`.

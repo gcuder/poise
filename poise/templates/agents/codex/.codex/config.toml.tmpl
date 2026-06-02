@@ -1,14 +1,22 @@
 # .codex/config.toml — {{REPO_NAME}}
 #
-# Codex project-local config. Registers UserPromptSubmit and Stop hooks
-# that delegate to the shared scripts under scripts/.
+# Codex project-local config. Registers SessionStart, UserPromptSubmit and
+# Stop hooks that delegate to the shared scripts under scripts/.
 #
 # Hook behaviour: every command hook receives one JSON object on stdin.
 # Hooks may print JSON to stdout to influence Codex (continue, stopReason,
 # systemMessage, suppressOutput). Here we print plain text via the shared
-# nudge scripts; Codex surfaces the text in the session context.
+# scripts; Codex surfaces the text in the session context.
+#
+# Note: the plan GATE (require_plan.py) is enforced agent-agnostically via
+# lefthook pre-commit, which covers Codex. Add a [[hooks.PreToolUse]] calling
+# `bash .codex/hooks/...` if you want edit-time (rather than commit-time)
+# blocking once you've confirmed your Codex version's PreToolUse block format.
 #
 # Reference: https://developers.openai.com/codex/hooks
+
+[[hooks.SessionStart]]
+command = "bash .codex/hooks/session_start.sh"
 
 [[hooks.UserPromptSubmit]]
 command = "bash .codex/hooks/user_prompt_submit.sh"

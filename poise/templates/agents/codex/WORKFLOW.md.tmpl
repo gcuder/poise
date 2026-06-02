@@ -9,7 +9,10 @@ Update this file when the team's process changes — it is versioned with code.
 ## Starting a task
 
 1. Read `AGENTS.md` — understand the repo structure, layer model, and rules.
-2. Check `docs/exec-plans/active/` — is there an existing plan for this task?
+   (The SessionStart hook also prints a brief with these rules + any active plan.)
+2. Check `docs/exec-plans/active/` — if a plan exists, work from it and check
+   off `- [ ]` steps as you go. If the task is multi-step and none exists,
+   create one **before editing** (see Planning).
 3. Check `docs/quality.md` — is there relevant known debt?
 4. Check `docs/decisions/` — does this task touch a past architectural decision?
 
@@ -19,10 +22,15 @@ If the task spans multiple sessions, touches more than two modules, or
 requires an architectural decision:
 
 - Create an execution plan at `docs/exec-plans/active/<slug>.md`
+  **before editing any source files — do not start editing until it exists.**
 - Use the template at `docs/exec-plans/template.md`
 - Record key decisions in the plan's decision log as work progresses
 
 Simple tasks (single file, one session): work directly, no plan needed.
+
+This is enforced: `scripts/require_plan.py` (lefthook pre-commit, on by default)
+blocks commits that change more than two source files without an active plan.
+Disable with `POISE_GATE=0`.
 
 ## Implementation
 

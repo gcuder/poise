@@ -190,6 +190,11 @@ Use: `templates/core/AGENTS.md.tmpl`
 Fill all `{{PLACEHOLDERS}}`. Keep under 100 lines.
 If content exceeds 100 lines, move it to `docs/`.
 
+The template's `## Read before you act` and `## Non-negotiable rules` H2
+sections are extracted verbatim at runtime by `scripts/session_brief.py` and
+injected at session start — keep both headings exactly as written so the brief
+finds them.
+
 Note: Claude Code also reads `CLAUDE.md`. If the agent list includes
 Claude Code, create `CLAUDE.md` as a one-line redirect:
 ```markdown
@@ -244,13 +249,43 @@ Copy as-is — both scripts are agent-agnostic. Only `{{REPO_NAME}}` to fill.
 These are the shared logic that all three adapters' prompt-time / stop-time
 hooks delegate to. Advisory only — exit 0 always.
 
+`nudge_plan.py` does two jobs every turn: it re-surfaces any active plan (so
+the agent keeps following it) and, when there is none and the prompt looks
+multi-step, prints an imperative directive to create one before editing. It
+imports `scripts/_plans.py`.
+
+#### scripts/_plans.py, scripts/session_brief.py, scripts/require_plan.py
+Use: `templates/core/scripts/_plans.py.tmpl`,
+     `templates/core/scripts/session_brief.py.tmpl`,
+     `templates/core/scripts/require_plan.py.tmpl`
+
+Copy as-is — agent-agnostic. Only `{{REPO_NAME}}` to fill.
+
+- `_plans.py` — shared active-plan parser. Single source of truth for reading
+  `docs/exec-plans/active/` and the `- [ ]` / `- [x]` convention (same anchors
+  the `stop_check_plans.sh` hook greps). Imported by the three scripts below.
+- `session_brief.py` — the **SessionStart brief**. Extracts the `Read before
+  you act` + `Non-negotiable rules` sections from `AGENTS.md` at runtime and
+  appends any active plan with its remaining steps. This is the guarantee that
+  rules + plan reach context every session. Adapters with a session-start
+  event call it; exit 0 always. Disable with `POISE_BRIEF=0`.
+- `require_plan.py` — the **plan gate** (ON by default). `--pretooluse` blocks
+  edits (exit 2) once a task touches more than two source files with no active
+  plan; `--staged` is the lefthook commit-time backstop (exit 1). Everything
+  under `docs/` is exempt, so writing the plan is never blocked. Disable with
+  `POISE_GATE=0`. This is a deliberate gate — the harness's default posture is
+  nudges, but plan-before-edit is enforced because advisory plan nudges alone
+  get ignored.
+
 #### Makefile
 Use: `templates/core/Makefile.tmpl`
 If a Makefile already exists, add harness targets without removing existing ones.
 
 #### lefthook.yml
 Use: `templates/core/lefthook.yml.tmpl`
-Adapt format/lint commands to `LANGUAGE`.
+Adapt format/lint commands to `LANGUAGE`. The `plan-gate` pre-commit command
+(`python3 scripts/require_plan.py --staged`) is the agent-agnostic backstop for
+the plan gate — keep it (it covers agents without an edit-time hook, e.g. Codex).
 
 #### docs/architecture.md
 Write from scratch using `LAYER_MODEL` and `RAW_MODULES`.
@@ -296,11 +331,13 @@ Generate if `AGENTS` includes Claude Code.
 Source directory: `templates/agents/claude-code/`
 
 Files:
-- `.claude/settings.json` — hook registration
+- `.claude/settings.json` — hook registration (SessionStart / PostToolUse / PreToolUse / UserPromptSubmit / Stop)
+- `.claude/hooks/session_start.sh` — print the harness brief (rules + active plan) via `session_brief.py` (SessionStart)
 - `.claude/hooks/post_write.sh` — format → lint → arch check → style check (PostToolUse)
-- `.claude/hooks/pre_bash.sh` — block destructive commands (PreToolUse)
+- `.claude/hooks/pre_bash.sh` — block destructive commands (PreToolUse on Bash)
+- `.claude/hooks/pre_write_plan_gate.sh` — plan gate via `require_plan.py` (PreToolUse on Write/Edit/MultiEdit)
 - `.claude/hooks/exit_plan_mode.sh` — write approved plan to `docs/exec-plans/active/` (PostToolUse on ExitPlanMode)
-- `.claude/hooks/user_prompt_submit.sh` — plan-mode nudge via `nudge_plan.py` (UserPromptSubmit)
+- `.claude/hooks/user_prompt_submit.sh` — plan directive + active-plan re-surface via `nudge_plan.py` (UserPromptSubmit)
 - `.claude/hooks/stop_check_plans.sh` — move fully-checked plans to `docs/exec-plans/completed/` (Stop)
 - `.claude/hooks/stop_nudge.sh` — docs-update nudge via `nudge_docs.py` (Stop)
 - `.claude/commands/sync-docs.md` — garbage collection sweep
@@ -321,17 +358,20 @@ Source directory: `templates/agents/codex/`
 
 Files:
 - `WORKFLOW.md` — Symphony-compatible workflow definition
-- `.codex/config.toml` — registers UserPromptSubmit + Stop hooks
-- `.codex/hooks/user_prompt_submit.sh` — plan-mode nudge (calls `scripts/nudge_plan.py`)
+- `.codex/config.toml` — registers SessionStart + UserPromptSubmit + Stop hooks
+- `.codex/hooks/session_start.sh` — harness brief (calls `scripts/session_brief.py`)
+- `.codex/hooks/user_prompt_submit.sh` — plan directive + active-plan re-surface (calls `scripts/nudge_plan.py`)
 - `.codex/hooks/stop_nudge.sh` — docs-update nudge (calls `scripts/nudge_docs.py`)
 
 The WORKFLOW.md documents the agent's expected workflow: read AGENTS.md,
 check exec-plans/active/, implement, run quality checks, do not open PR.
 This file is versioned with the code so teams can evolve it.
 
-The two hooks share logic with the Claude Code adapter via the scripts/
-directory — Codex calls the same `nudge_plan.py` / `nudge_docs.py` so
-behaviour stays consistent across agents.
+The hooks share logic with the Claude Code adapter via the scripts/
+directory — Codex calls the same `session_brief.py` / `nudge_plan.py` /
+`nudge_docs.py` so behaviour stays consistent across agents. The plan gate is
+enforced for Codex via the lefthook `plan-gate` (commit-time); Codex also has
+`PreToolUse` if you want edit-time blocking.
 
 #### OpenCode
 Generate if `AGENTS` includes OpenCode.
@@ -339,18 +379,22 @@ Source directory: `templates/agents/opencode/`
 
 Files:
 - `.opencode/opencode.json` — instructions config pointing to AGENTS.md
-- `.opencode/plugins/harness.ts` — post-write hooks (format → lint → arch → style),
-  plus `session.idle` and best-effort `event`-based nudges that delegate to
-  `scripts/nudge_docs.py` / `scripts/nudge_plan.py`
+- `.opencode/plugins/harness.ts` — post-write hooks (format → lint → arch → style);
+  `tool.execute.before` plan gate (calls `scripts/require_plan.py`) + bash guard;
+  best-effort `event` brief (`session_brief.py`) and plan nudge (`nudge_plan.py`);
+  `session.idle` docs nudge (`nudge_docs.py`)
 - `.opencode/commands/sync-docs.md` — garbage collection
 - `.opencode/commands/plan.md` — execution plan creation
 
 Note: OpenCode natively reads `.claude/skills/` — the harness generator
 skill itself is already available to OpenCode without additional setup.
 
-Note: OpenCode has no first-class `UserPromptSubmit` equivalent. The plan
-nudge is wired to the generic `event` hook on a best-effort basis (see
-`templates/agents/opencode/ADAPTER.md` for the linked upstream issue).
+Note: OpenCode has no first-class `UserPromptSubmit` or `SessionStart`. The
+plan nudge and the brief are wired to the generic `event` hook on a best-effort
+basis; the guaranteed path for rules is the native `instructions: ["AGENTS.md"]`
+(which carries the "Read before you act" block). The plan GATE, however, is
+real here — `tool.execute.before` throws to block edits. See
+`templates/agents/opencode/ADAPTER.md` for the linked upstream issue.
 
 ---
 
@@ -367,6 +411,18 @@ Install pre-commit / post-merge hooks:
 Run the architecture + style checks (expect violations — they're useful signal):
   {{CHECK_ARCH_CMD}}
   {{CHECK_STYLE_CMD}}
+
+Verify the session brief + plan gate:
+  - Start a fresh agent session — you should see the POISE HARNESS BRIEF
+    (rules + any active plan). If a plan is active, it lists remaining steps.
+  - Try editing a 3rd source file with no active plan — the gate blocks it
+    with a remediation pointing at docs/exec-plans/active/.
+
+Escape hatches (per session, env vars):
+  POISE_BRIEF=0        # silence the SessionStart brief
+  POISE_NUDGE_PLAN=0   # silence the plan nudge
+  POISE_NUDGE_DOCS=0   # silence the docs nudge
+  POISE_GATE=0         # disable the plan gate (edit-time + commit-time)
 
 Add gc-report ignore:
   echo "docs/.gc-report-*.md" >> .gitignore
@@ -408,5 +464,15 @@ Known limitations:
   the check rather than inventing rules.
 - **gc_static.py exits 0 by default.** Never gate merges on it; it's a report,
   not a check. The lefthook post-merge hook runs it for visibility, not enforcement.
+- **The SessionStart brief is the guarantee.** Advisory nudges get ignored;
+  the brief makes the enforced rules + the active plan unavoidably present in
+  context every session. Keep it compact (≤40 lines) — it reads the short rule
+  bullets out of AGENTS.md and points to docs/ for detail; heavy content stays
+  in docs/, surfaced by pointer.
+- **The plan gate is the one deliberate gate.** Default posture is nudges, but
+  plan-before-edit is enforced (`require_plan.py`, ON) because the advisory plan
+  nudge alone doesn't change behaviour. It only triggers past two source files
+  and exempts docs/, so small changes and writing the plan itself stay frictionless.
+  Every gate/brief/nudge has an env escape hatch (`POISE_GATE`/`POISE_BRIEF`/`POISE_NUDGE_*`).
 - **The harness should feel lightweight.** If anything feels heavy or bureaucratic,
   it belongs in docs/, not in the entry file.

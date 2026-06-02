@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# .claude/hooks/session_start.sh — {{REPO_NAME}}
+#
+# SessionStart hook: fires at session start (startup / resume / clear / compact).
+# Forwards the JSON envelope to the shared brief script; its stdout is injected
+# into the session context, guaranteeing the agent sees the enforced rules and
+# any active execution plan without having to open AGENTS.md itself.
+#
+# The brief script decides verbosity from the `source` field. Advisory — exit 0
+# always. Silence with POISE_BRIEF=0.
+
+set -uo pipefail
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/session_brief.py || true
+fi
+
+exit 0

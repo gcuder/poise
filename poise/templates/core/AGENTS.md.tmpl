@@ -4,6 +4,16 @@
 
 ---
 
+## Read before you act
+
+Before editing, read the `docs/` file for the area you're touching (see **Start
+here**). For multi-step work (more than two files / modules), create an execution
+plan in `docs/exec-plans/active/` **before** editing and work from it. Your
+SessionStart brief surfaces the active plan and these rules every session; the
+plan gate (`scripts/require_plan.py`, on by default) enforces it.
+
+---
+
 ## Start here
 
 | Question                           | Read                                          |
@@ -68,8 +78,10 @@ Violations are caught by `{{CHECK_ARCH_CMD}}` and the post-write hook.
 
 ## Plans
 
-Complex work gets an execution plan in `docs/exec-plans/active/`.
-Simple tasks (single file, one session): work directly.
+Multi-step work (more than two files / modules) gets an execution plan in
+`docs/exec-plans/active/` **before editing — do not start editing until the plan
+exists.** Simple tasks (single file, one session): work directly. The plan gate
+(`scripts/require_plan.py`, on by default) enforces this; disable with `POISE_GATE=0`.
 
 **Active plans are created automatically.** When you approve a plan in Claude
 Code's plan mode, the `ExitPlanMode` hook writes it to
