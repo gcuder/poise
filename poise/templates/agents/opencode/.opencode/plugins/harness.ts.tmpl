@@ -11,6 +11,10 @@
  */
 
 export default function (ctx: any) {
+  // OpenCode has no first-class SessionStart event. We print the harness brief
+  // (rules + active plan) once per plugin load, on the first event we see.
+  let briefed = false;
+
   return {
     hooks: {
       /**
@@ -91,6 +95,17 @@ export default function (ctx: any) {
        * depending on the OpenCode version.
        */
       "event": async (event: any) => {
+        // Best-effort SessionStart brief: fire once, on the first event.
+        if (!briefed) {
+          briefed = true;
+          try {
+            const b = await ctx.exec("python3 scripts/session_brief.py");
+            if (b?.stdout?.trim()) ctx.log(b.stdout);
+          } catch {
+            // Best-effort only.
+          }
+        }
+
         const type: string = event?.type ?? "";
         if (!/prompt|message|input/i.test(type)) return;
         const prompt: string =
@@ -111,11 +126,43 @@ export default function (ctx: any) {
       },
 
       /**
-       * Pre-execution guard: block destructive bash commands.
+       * Pre-execution guard:
+       *   - write/edit/apply_patch → plan gate (block multi-file source edits
+       *     until an execution plan exists; delegates to require_plan.py)
+       *   - bash → block destructive commands
        * Throw an error to cancel the operation.
        */
       "tool.execute.before": async (event: any) => {
         const tool = event.input?.tool as string | undefined;
+
+        // Plan gate (on by default; disable with POISE_GATE=0).
+        if (tool && ["write", "edit", "apply_patch"].includes(tool)) {
+          const filePath: string =
+            event.input?.args?.filePath ||
+            event.input?.args?.path ||
+            event.input?.args?.file ||
+            "";
+          const sessionId: string =
+            event?.sessionID || event?.session?.id || "default";
+          try {
+            const payload = JSON.stringify({
+              tool_input: { file_path: filePath },
+              session_id: sessionId,
+            });
+            // require_plan.py exits non-zero to block; ctx.exec rejects on that.
+            await ctx.exec(
+              `printf %s ${JSON.stringify(payload)} | python3 scripts/require_plan.py --pretooluse`,
+            );
+          } catch (e: any) {
+            const reason =
+              (typeof e?.stderr === "string" && e.stderr.trim()) ||
+              "POISE PLAN GATE: create docs/exec-plans/active/<slug>.md before " +
+                "editing more source files (disable with POISE_GATE=0).";
+            throw new Error(reason);
+          }
+          return;
+        }
+
         if (tool !== "bash") return;
 
         const command: string = event.input?.args?.command ?? "";

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# .codex/hooks/session_start.sh — {{REPO_NAME}}
+#
+# SessionStart hook: forwards the JSON envelope to the shared brief script so
+# Codex sees the enforced rules and any active execution plan at session start.
+# Same shared script the Claude Code adapter calls — logic lives in scripts/.
+#
+# Advisory — exit 0 always. Silence with POISE_BRIEF=0.
+
+set -uo pipefail
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/session_brief.py || true
+fi
+
+exit 0

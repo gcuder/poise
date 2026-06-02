@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# .claude/hooks/pre_write_plan_gate.sh — {{REPO_NAME}}
+#
+# PreToolUse hook on Write|Edit|MultiEdit. Forwards the JSON envelope to the
+# shared plan gate. The gate blocks (exit 2) once a task edits more than two
+# source files with no execution plan in docs/exec-plans/active/; its stderr
+# is the remediation Claude sees and acts on. Writing the plan itself (or any
+# docs/ file) is never blocked, so there is no deadlock.
+#
+# The gate is ON by default — this is the hard enforcement behind the advisory
+# plan nudge. Disable with POISE_GATE=0.
+
+set -uo pipefail
+
+if command -v python3 >/dev/null 2>&1; then
+  python3 scripts/require_plan.py --pretooluse
+  exit $?
+fi
+
+exit 0

@@ -32,6 +32,17 @@ pre-commit:
         Read the REMEDIATION instruction above and fix the code.
         Do not bypass this check.
 
+    # Plan gate (agent-agnostic backstop; on by default). Blocks a commit that
+    # changes more than two source files with no execution plan in
+    # docs/exec-plans/active/. This is the guaranteed gate for agents without
+    # an edit-time hook (e.g. Codex). Disable with POISE_GATE=0.
+    plan-gate:
+      run: python3 scripts/require_plan.py --staged
+      fail_text: |
+        Plan gate: this commit changes more than two source files with no
+        execution plan. Create docs/exec-plans/active/<slug>.md first, then
+        commit. Disable with POISE_GATE=0.
+
 pre-push:
   commands:
     typecheck:

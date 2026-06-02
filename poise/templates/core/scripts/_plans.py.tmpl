@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+Shared active-plan helpers for {{REPO_NAME}}.
+
+Single source of truth for reading docs/exec-plans/active/ and the
+`- [ ]` / `- [x]` checkbox convention. Imported by session_brief.py,
+nudge_plan.py, and require_plan.py so every Python caller parses plans
+identically.
+
+NOTE: the checkbox anchors here (`^- [ ]` / `^- [x]`) must stay in sync
+with .claude/hooks/stop_check_plans.sh, which greps the same patterns to
+promote finished plans. If you change the convention, change both.
+
+Never raises into a hook — all file access is best-effort and returns
+empty results on error.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+UNCHECKED_RE = re.compile(r"^- \[ \]\s*(.*)$")
+CHECKED_RE = re.compile(r"^- \[[xX]\]\s*(.*)$")
+TITLE_RE = re.compile(r"^#\s+(.*)$")
+
+
+def project_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def active_dir() -> Path:
+    return project_dir() / "docs" / "exec-plans" / "active"
+
+
+def iter_active_plans() -> list[Path]:
+    """Active plan files, newest first. Empty list on any error."""
+    try:
+        plans = [p for p in active_dir().glob("*.md") if p.is_file()]
+    except OSError:
+        return []
+
+    def _mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    plans.sort(key=_mtime, reverse=True)
+    return plans
+
+
+def has_active_plan() -> bool:
+    return bool(iter_active_plans())
+
+
+def parse_plan(path: Path) -> dict:
+    """Return {path, title, checked, unchecked, total, next_steps}."""
+    title = path.stem
+    checked = 0
+    unchecked_steps: list[str] = []
+    try:
+        lines = path.read_text(errors="ignore").splitlines()
+    except OSError:
+        lines = []
+
+    got_title = False
+    for line in lines:
+        if not got_title:
+            m = TITLE_RE.match(line)
+            if m and m.group(1).strip():
+                title = m.group(1).strip()
+                got_title = True
+        if CHECKED_RE.match(line):
+            checked += 1
+            continue
+        m = UNCHECKED_RE.match(line)
+        if m:
+            unchecked_steps.append(m.group(1).strip() or "(unnamed step)")
+
+    return {
+        "path": path,
+        "title": title,
+        "checked": checked,
+        "unchecked": len(unchecked_steps),
+        "total": checked + len(unchecked_steps),
+        "next_steps": unchecked_steps,
+    }
+
+
+def _rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(project_dir()))
+    except ValueError:
+        return str(path)
+
+
+def summarize_active(max_plans: int = 2) -> str | None:
+    """One imperative line per active plan, or None when there are none."""
+    plans = iter_active_plans()
+    if not plans:
+        return None
+    out: list[str] = []
+    for p in plans[:max_plans]:
+        info = parse_plan(p)
+        out.append(
+            f"active plan {_rel(p)} — {info['unchecked']} step(s) remaining. "
+            f"Work from it and check off `- [ ]` steps as you complete them."
+        )
+    return "\n".join(out)
+
+
+def brief_active(max_plans: int = 2, max_steps: int = 6) -> str | None:
+    """Fuller multi-line block (title, progress, unchecked steps), or None."""
+    plans = iter_active_plans()
+    if not plans:
+        return None
+    out: list[str] = []
+    for p in plans[:max_plans]:
+        info = parse_plan(p)
+        out.append(
+            f"- {info['title']} ({_rel(p)}) — {info['checked']}/{info['total']} done"
+        )
+        for step in info["next_steps"][:max_steps]:
+            out.append(f"    [ ] {step}")
+        extra = info["unchecked"] - max_steps
+        if extra > 0:
+            out.append(f"    … +{extra} more step(s)")
+    return "\n".join(out)

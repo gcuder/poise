@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""
+SessionStart harness brief for {{REPO_NAME}}.
+
+Printed into the agent's context at session start (Claude Code SessionStart,
+Codex SessionStart, OpenCode best-effort). This is the guarantee that the
+enforced rules and any active execution plan reach the agent's context —
+without it having to choose to open AGENTS.md.
+
+- Rules are extracted from AGENTS.md at runtime (single source of truth — no
+  generation-time duplication, so the brief cannot drift from AGENTS.md).
+- Active plans are read live from docs/exec-plans/active/ via _plans.py.
+
+Reads the session JSON envelope on stdin (tolerant of empty stdin). On
+`resume` / `compact` sources the full brief is already earlier in the
+transcript, so we print only the active-plan section plus a one-line rules
+pointer.
+
+Disable with POISE_BRIEF=0. Exit 0 always — advisory, never blocks.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _plans  # noqa: E402
+
+# AGENTS.md H2 sections surfaced verbatim in the brief.
+SECTIONS = ("Read before you act", "Non-negotiable rules")
+
+
+def read_source() -> str:
+    """The SessionStart `source` (startup|resume|clear|compact), or ''."""
+    try:
+        if sys.stdin.isatty():
+            return ""
+        raw = sys.stdin.read()
+    except (OSError, ValueError):
+        return ""
+    if not raw.strip():
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    return str(payload.get("source", "")).strip().lower()
+
+
+def extract_section(text: str, title: str) -> str | None:
+    """Body of the `## <title>` section, up to the next H2 heading.
+
+    Markdown horizontal rules (`---` / `***` / `___`) are dropped so the
+    brief doesn't echo AGENTS.md's section separators.
+    """
+    out: list[str] = []
+    capturing = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = line[3:].strip().lower().startswith(title.lower())
+            continue
+        if capturing:
+            if set(line.strip()) in ({"-"}, {"*"}, {"_"}):
+                continue  # horizontal rule
+            out.append(line)
+    body = "\n".join(out).strip()
+    return body or None
+
+
+def rules_block() -> str | None:
+    try:
+        text = (_plans.project_dir() / "AGENTS.md").read_text(errors="ignore")
+    except OSError:
+        return None
+    chunks: list[str] = []
+    for title in SECTIONS:
+        body = extract_section(text, title)
+        if body:
+            chunks.append(f"{title}:\n{body}")
+    return "\n\n".join(chunks) or None
+
+
+def main() -> int:
+    if os.environ.get("POISE_BRIEF") == "0":
+        return 0
+
+    source = read_source()
+    lines: list[str] = ["POISE HARNESS BRIEF — read before acting."]
+
+    if source in ("resume", "compact"):
+        lines.append("Rules + conventions: see AGENTS.md (Non-negotiable rules).")
+    else:
+        rules = rules_block()
+        if rules:
+            lines.append("")
+            lines.append(rules)
+        else:
+            lines.append("Read AGENTS.md before editing — it holds the enforced rules.")
+
+    lines.append("")
+    plan = _plans.brief_active()
+    if plan:
+        lines.append("Active execution plan(s):")
+        lines.append(plan)
+    else:
+        lines.append(
+            "No active execution plan. For multi-step work (more than two files / "
+            "modules), create one in docs/exec-plans/active/ BEFORE editing."
+        )
+
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
