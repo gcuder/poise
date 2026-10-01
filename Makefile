@@ -4,16 +4,19 @@
 #   - ~/.claude/skills/poise/      (Claude Code + OpenCode — OpenCode reads
 #                                   .claude/skills/ natively)
 #   - $CODEX_HOME/skills/poise/    (Codex; default ~/.codex/skills/)
+#   - $PI_CODING_AGENT_DIR/skills/poise/ (Pi; default ~/.pi/agent/skills/)
 #
 # Codex must be RESTARTED after install or sync — it reloads skill metadata
 # on launch only.
 
-.PHONY: install sync install-check uninstall help _copy
+.PHONY: install sync install-check uninstall help _copy test
 
 SKILL_SRC   := $(CURDIR)/poise
 CLAUDE_DEST := $(HOME)/.claude/skills/poise
 CODEX_HOME  ?= $(HOME)/.codex
 CODEX_DEST  := $(CODEX_HOME)/skills/poise
+PI_CODING_AGENT_DIR ?= $(HOME)/.pi/agent
+PI_DEST     := $(PI_CODING_AGENT_DIR)/skills/poise
 
 # Set FORCE=1 to clobber existing installs / skip confirmation prompts.
 FORCE ?=
@@ -21,16 +24,17 @@ FORCE ?=
 help:
 	@echo "poise installer"
 	@echo ""
-	@echo "  make install         install into ~/.claude/skills/ and ~/.codex/skills/"
+	@echo "  make install         install for Claude Code, OpenCode, Codex, and Pi"
 	@echo "                       (refuses to overwrite unless FORCE=1)"
 	@echo "  make sync            re-copy after a git pull; clobbers without prompt"
 	@echo "  make install-check   report status of each install dir"
-	@echo "  make uninstall       remove both install dirs (prompts unless FORCE=1)"
+	@echo "  make uninstall       remove all three install dirs (prompts unless FORCE=1)"
+	@echo "  make test            run adapter and installer tests (npm ci first)"
 	@echo ""
 	@echo "Codex must be restarted after install or sync to reload skill metadata."
 
 install:
-	@for dest in $(CLAUDE_DEST) $(CODEX_DEST); do \
+	@for dest in "$(CLAUDE_DEST)" "$(CODEX_DEST)" "$(PI_DEST)"; do \
 		if [ -e "$$dest" ] && [ -z "$(FORCE)" ]; then \
 			echo "ERROR: $$dest already exists."; \
 			echo "       Use 'make sync' to update an existing install,"; \
@@ -41,12 +45,14 @@ install:
 	@$(MAKE) --no-print-directory _copy
 	@echo "✓ Installed to $(CLAUDE_DEST) (Claude Code + OpenCode)"
 	@echo "✓ Installed to $(CODEX_DEST) (Codex)"
+	@echo "✓ Installed to $(PI_DEST) (Pi)"
+	@echo "Run /reload in Pi to pick up the skill."
 	@echo ""
 	@echo "Restart Codex to pick up the new skill (codex reloads on launch only)."
 
 sync:
 	@printf "Source:       %s\n\n" "$(SKILL_SRC)"
-	@for entry in "Claude Code + OpenCode|$(CLAUDE_DEST)" "Codex|$(CODEX_DEST)"; do \
+	@for entry in "Claude Code + OpenCode|$(CLAUDE_DEST)" "Codex|$(CODEX_DEST)" "Pi|$(PI_DEST)"; do \
 		label=$${entry%%|*}; \
 		dest=$${entry##*|}; \
 		if [ ! -e "$$dest" ]; then \
@@ -63,12 +69,14 @@ sync:
 	done
 	@$(MAKE) --no-print-directory _copy
 	@printf "\n✓ Synced to %s\n" "$(CLAUDE_DEST)"
-	@printf "✓ Synced to %s\n\n" "$(CODEX_DEST)"
+	@printf "✓ Synced to %s\n" "$(CODEX_DEST)"
+	@printf "✓ Synced to %s\n\n" "$(PI_DEST)"
+	@echo "Run /reload in Pi to pick up the changes."
 	@echo "Restart Codex to pick up the changes (codex reloads on launch only)."
 
 install-check:
 	@printf "Source:       %s\n\n" "$(SKILL_SRC)"
-	@for entry in "Claude Code + OpenCode|$(CLAUDE_DEST)" "Codex|$(CODEX_DEST)"; do \
+	@for entry in "Claude Code + OpenCode|$(CLAUDE_DEST)" "Codex|$(CODEX_DEST)" "Pi|$(PI_DEST)"; do \
 		label=$${entry%%|*}; \
 		dest=$${entry##*|}; \
 		printf "%s\n  %s\n" "$$label" "$$dest"; \
@@ -88,21 +96,26 @@ install-check:
 
 uninstall:
 	@if [ -z "$(FORCE)" ]; then \
-		printf "Remove %s and %s? [y/N] " "$(CLAUDE_DEST)" "$(CODEX_DEST)"; \
+		printf "Remove %s, %s and %s? [y/N] " "$(CLAUDE_DEST)" "$(CODEX_DEST)" "$(PI_DEST)"; \
 		read ans; \
 		case "$$ans" in \
 			y|Y|yes|YES) ;; \
 			*) echo "Aborted."; exit 1 ;; \
 		esac; \
 	fi
-	@rm -rf "$(CLAUDE_DEST)" "$(CODEX_DEST)"
+	@rm -rf "$(CLAUDE_DEST)" "$(CODEX_DEST)" "$(PI_DEST)"
 	@echo "✓ Removed $(CLAUDE_DEST)"
 	@echo "✓ Removed $(CODEX_DEST)"
+	@echo "✓ Removed $(PI_DEST)"
 
 # Internal: replace each dest with a fresh copy of the source. Scoped to the
 # `poise/` subdir of each skills/ dir — never touches anything else.
 _copy:
-	@mkdir -p "$(dir $(CLAUDE_DEST))" "$(dir $(CODEX_DEST))"
-	@rm -rf "$(CLAUDE_DEST)" "$(CODEX_DEST)"
+	@mkdir -p "$$(dirname "$(CLAUDE_DEST)")" "$$(dirname "$(CODEX_DEST)")" "$$(dirname "$(PI_DEST)")"
+	@rm -rf "$(CLAUDE_DEST)" "$(CODEX_DEST)" "$(PI_DEST)"
 	@cp -R "$(SKILL_SRC)" "$(CLAUDE_DEST)"
 	@cp -R "$(SKILL_SRC)" "$(CODEX_DEST)"
+	@cp -R "$(SKILL_SRC)" "$(PI_DEST)"
+
+test:
+	@npm test

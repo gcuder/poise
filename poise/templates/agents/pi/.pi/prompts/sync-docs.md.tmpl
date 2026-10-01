@@ -1,0 +1,22 @@
+---
+description: Run a read-only documentation drift audit
+---
+# Sync Docs — {{REPO_NAME}}
+
+Read-only audit. Do not modify code or docs.
+
+1. Run `python3 scripts/gc_static.py` for the deterministic baseline.
+2. Compare actual modules with docs/architecture.md. Layer model:
+   {{LAYER_MODEL_INLINE}}.
+3. Spot-check recent changes against docs/conventions.md and package boundaries.
+4. Review docs/quality.md for stale debt and recurring undocumented failures.
+5. Review docs/exec-plans/active/ for plans that appear complete.
+6. Check docs/decisions/ for references to moved or deleted modules.
+7. Review docs/product-specs/ and docs/references/ for stale pointers.
+
+Produce a dated drift report with module mismatches, convention violations
+(file:line), stale quality entries, apparently complete plans, broken links,
+and prioritised recommended actions. Use the baseline as evidence, not a
+substitute for the judgment-required passes. Do not fix anything.
+
+Additional focus: $ARGUMENTS

@@ -10,7 +10,9 @@ description: >
 # harness-generator
 
 Generate a complete OpenAI-style agent harness for any repository.
-Works with Claude Code, Codex, OpenCode, or any coding agent.
+Works with Claude Code, Codex, OpenCode, Pi, or any coding agent.
+Resolve all `templates/` paths relative to this skill's directory, not the
+repository receiving the generated harness.
 
 ---
 
@@ -128,6 +130,7 @@ Ask the user which coding agent(s) they use:
 - Claude Code
 - Codex
 - OpenCode
+- Pi (0.99.2+)
 - Other (describe)
 - Multiple (list them)
 
@@ -246,7 +249,7 @@ Use: `templates/core/scripts/nudge_plan.py.tmpl`,
      `templates/core/scripts/nudge_docs.py.tmpl`
 
 Copy as-is — both scripts are agent-agnostic. Only `{{REPO_NAME}}` to fill.
-These are the shared logic that all three adapters' prompt-time / stop-time
+These are the shared logic that all adapters' prompt-time / stop-time
 hooks delegate to. Advisory only — exit 0 always.
 
 `nudge_plan.py` does two jobs every turn: it re-surfaces any active plan (so
@@ -396,6 +399,52 @@ basis; the guaranteed path for rules is the native `instructions: ["AGENTS.md"]`
 real here — `tool.execute.before` throws to block edits. See
 `templates/agents/opencode/ADAPTER.md` for the linked upstream issue.
 
+#### Pi
+Generate if `AGENTS` includes Pi.
+Source directory: `templates/agents/pi/`. Read its `ADAPTER.md` before generating.
+
+Files:
+- `.pi/extensions/harness.ts` — native Pi lifecycle/tool hooks
+- `.pi/hooks/archive_plans.py` — archives fully checked plans using `_plans.py`
+- `.pi/prompts/plan.md` — `/plan <task>` execution-plan creation
+- `.pi/prompts/sync-docs.md` — `/sync-docs` read-only drift audit
+
+Fill `PI_CHECKS_JSON` with an ordered array of formatter/linter argv specs
+for `LANGUAGE`, preferring existing repo commands. For Python use Ruff format
+then Ruff check; TypeScript Prettier then ESLint; Go gofmt then golangci-lint;
+Rust rustfmt then cargo clippy. Use separate argv strings and `{file}` for the
+absolute file path; no shell snippets or interpolated commands. See ADAPTER.md
+for the exact shape. Leave `[]` only if no tools exist, and report the gap.
+Fill `DANGEROUS_PATTERNS_TS` for `DEPLOY_TARGET` and `SECRET_PATTERNS_TS` for
+project conventions with regex literals, or empty strings. Add a Secrets
+section to `docs/conventions.md` so the guard's remediation anchor resolves.
+Fill `REPO_NAME` and `LAYER_MODEL_INLINE` in the prompt templates.
+
+The extension injects rules/plan into context at session start and refreshes
+before each run. `tool_call` blocks built-in write/edit via the shared plan
+gate and guards bash/powershell; `tool_result` appends check output to the
+model-visible result. `agent_before_settle` archives finished plans and adds a
+docs nudge without forcing a continuation. Keep the serialization, Pi mutation
+queue, bounded output, cancellation, timeouts, and fail-closed gate behavior.
+Do not replace Pi's system prompt or change `.pi/settings.json` unnecessarily.
+
+**Architecture coverage:** fill `PI_ARCH_CHECK_JSON` with the architecture
+command spec (same shape as a formatter spec). For Python use extensions
+`[".py"]`, command `"python3"`, args
+`["scripts/check_architecture.py", "{file}"]`. The core checker only parses
+Python imports. For non-Python repos, implement/configure the appropriate
+checker or use `null` and report missing boundary coverage. Unsupported source
+file types produce model-visible coverage warnings; never present a no-op
+scan as enforcement.
+
+Pi requires project trust before loading `.pi/extensions/` and `.pi/prompts/`.
+Have the user review generated code, trust the project, and run `/reload` (or
+restart Pi at the repo root). Automated print/RPC runs need saved trust or an
+explicit reviewed `--approve`. No compilation or Bun is required. Pin support
+to Pi 0.99.2+ (`@earendil-works/pi-coding-agent`); older package-name APIs need a
+separate compatibility adapter. Arbitrary shell/custom-tool edits can bypass
+these hooks, so keep lefthook/CI as backstops.
+
 ---
 
 ## Phase 3 — Handoff
@@ -428,7 +477,8 @@ Add gc-report ignore:
   echo "docs/.gc-report-*.md" >> .gitignore
 
 Commit the harness:
-  git add AGENTS.md .claude/ .opencode/ docs/ scripts/ tests/ lefthook.yml Makefile .gitignore
+  git add AGENTS.md docs/ scripts/ tests/ lefthook.yml Makefile .gitignore
+  # Also add the generated agent directories: .claude/, .codex/, .opencode/, .pi/.
   git commit -m "chore: add agent harness"
 
 Garbage collection:
@@ -448,6 +498,13 @@ Known limitations:
 ---
 
 ## Notes for the generating agent
+
+- **Tailor the handoff to generated adapters.** For Pi, explain project trust,
+  `/reload`, `/plan <task>`, `/sync-docs`, and Pi 0.99.2+. Validate by editing
+  three distinct source files without a plan, seeing the third blocked, then
+  creating a plan and retrying. Validate that lint remediation reaches the
+  tool result and a finished plan moves without overwriting an existing file.
+  Report shell/custom-tool bypasses and any unavailable language checker.
 
 - **AGENTS.md must stay under 100 lines.** If it's longer, move content to docs/.
 - **Remediation messages are the highest-value output.** A linter that says "violation"

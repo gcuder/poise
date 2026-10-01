@@ -1,0 +1,14 @@
+{
+  "name": "poise-adapter-tests",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs && node tests/typecheck.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.2",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

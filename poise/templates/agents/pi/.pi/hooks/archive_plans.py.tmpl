@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Archive fully checked plans for {{REPO_NAME}} without overwriting history."""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+import _plans  # noqa: E402
+
+
+def main() -> int:
+    os.environ["CLAUDE_PROJECT_DIR"] = str(ROOT)
+    completed = ROOT / "docs/exec-plans/completed"
+    for path in _plans.iter_active_plans():
+        if path.is_symlink():
+            continue
+        info = _plans.parse_plan(path)
+        # Empty plans and prose-only drafts must not be silently archived.
+        if not info["checked"] or info["unchecked"]:
+            continue
+        target = completed / path.name
+        try:
+            completed.mkdir(parents=True, exist_ok=True)
+            # Atomic create-if-absent; two processes cannot clobber history.
+            # Keep the source if linking/unlinking fails. Both dirs should be
+            # on the same filesystem, as in the generated harness layout.
+            os.link(path, target)
+            path.unlink()
+            print(f"POISE: archived completed plan to docs/exec-plans/completed/{path.name}")
+        except FileExistsError:
+            print(f"POISE: {target.name} already exists in completed/. "
+                  "REMEDIATION: choose a unique plan filename and archive manually; both plans were preserved.")
+        except OSError as error:
+            print(f"POISE: could not archive {path.name}: {error}. "
+                  "REMEDIATION: move the completed plan manually without overwriting history.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
