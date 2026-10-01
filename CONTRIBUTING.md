@@ -56,14 +56,37 @@ The SKILL.md is the generator logic. Changes to it affect all agents.
 
 ## Testing
 
-There is no automated test suite for the generator (it's a prompt, not code).
+The generator protocol is a prompt; adapter behavior and installation have
+automated regression tests. Run them with Node.js 22.19+ and Python 3.10+:
+
+```bash
+npm ci --ignore-scripts
+make test
+```
+
+The suite renders the Pi templates, invokes native handlers with real Python
+scripts and Pi's mutation queue, exercises installation in isolated temporary
+directories, and typechecks the extension against the pinned Pi 0.99.2 API.
+It requires no model credentials and does not modify personal installs.
+The pinned upstream Pi 0.99.2 test dependency currently shrinkwraps
+`brace-expansion` 5.0.9, which `npm audit` flags for denial-of-service issues.
+This is a dev-only upstream dependency, not shipped in generated harnesses;
+use trusted fixture inputs and update the pin when upstream fixes it. Do not
+hide the finding by changing only the lockfile: upstream's shrinkwrap can
+still install the old version.
+
 Before submitting a PR:
 
-1. Run `make sync` (and restart Codex if you use it) so your edits are picked up by the agent you're testing with.
+1. Run `make sync` (restart Codex / run `/reload` in Pi) so your edits are picked up by the agent you're testing with.
 2. Run the generator on a real repo in your target language.
 3. Run `make check-arch` on the output.
 4. Verify the AGENTS.md is under 100 lines.
 5. Verify every violation in `check-arch` output has a REMEDIATION line.
+6. For Pi, trust the generated project, `/reload`, verify the session brief,
+   third-source-file block, model-visible lint feedback, `/plan`, `/sync-docs`,
+   completed-plan archival, and all `POISE_*` escape hatches. Test print/RPC
+   mode without UI. Never claim non-Python architecture coverage from the
+   Python-only core checker.
 
 ## License
 

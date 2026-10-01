@@ -1,0 +1,22 @@
+---
+description: Create a versioned execution plan before implementing a multi-file task
+argument-hint: "<task>"
+---
+# Create Execution Plan — {{REPO_NAME}}
+
+Task: $ARGUMENTS
+
+Read AGENTS.md, docs/architecture.md, docs/quality.md, and relevant ADRs
+in docs/decisions/. Check docs/exec-plans/active/ before creating another plan.
+
+Create docs/exec-plans/active/<unique-slug>.md with:
+- Title, status (active), creation date, and affected modules
+- Goal, context (links to spec/ADR/debt), and out-of-scope work
+- Steps as `- [ ]` checkboxes, one concrete action per step
+- Decision log, known risks, and a testable definition of done
+
+A plan is required before editing more than two source files. Docs are exempt.
+Summarise the approach and wait for explicit user approval before implementing.
+Work from the plan and check off steps as they finish. Pi archives plans with
+at least one checked step and no unchecked steps when the run completes.
+Do not mark steps complete merely to bypass the gate.

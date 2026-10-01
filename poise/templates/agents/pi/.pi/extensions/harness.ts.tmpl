@@ -1,0 +1,217 @@
+/** Native Pi hooks for {{REPO_NAME}}. Requires Pi >= 0.99.2 and Python 3.10+. */
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+
+// Fill with ordered format/lint commands for the discovered language. Use argv,
+// not shell strings. {file} is replaced with an absolute path as ONE argument.
+// Each entry: { extensions: [".py"], command: "ruff", args: ["format", "{file}"] }
+type Check = { extensions: string[]; command: string; args: string[] };
+const CHECKS: Check[] = {{PI_CHECKS_JSON}};
+// Python core checker, a language-specific checker, or null (report the gap).
+const ARCHITECTURE: Check | null = {{PI_ARCH_CHECK_JSON}};
+const DANGEROUS = [
+  /\brm\s+[^;\n]*(?:-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)[a-z]*\s+(?:\/|\*)/i,
+  /\bDROP\s+(?:TABLE|DATABASE)\b/i,
+  {{DANGEROUS_PATTERNS_TS}}
+];
+const SECRETS = [
+  /\becho\b[^\n]*password/i,
+  /\bcat\b[^\n]*\.env\b/i,
+  /\bprintenv\b[^\n]*(?:KEY|SECRET|TOKEN)/i,
+  {{SECRET_PATTERNS_TS}}
+];
+const ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), "../.."));
+const LIMIT = 12_000;
+const TIMEOUT_MS = 120_000;
+
+type Result = { code: number; output: string };
+function bounded(text: string): string {
+  return text.length <= LIMIT ? text : text.slice(0, LIMIT) + "\n[poise output truncated]";
+}
+
+// Pi's exec API has no stdin option. Spawn directly to send JSON envelopes
+// without shell quoting, interpolation, temporary files, or leaking the prompt
+// into process arguments. No processes are started during extension discovery.
+function run(command: string, args: string[], payload?: unknown, signal?: AbortSignal): Promise<Result> {
+  return new Promise((done) => {
+    if (signal?.aborted) return done({ code: 1, output: "POISE: hook cancelled." });
+    let output = "";
+    let failure = "";
+    const child = spawn(command, args, {
+      cwd: ROOT,
+      env: { ...process.env, CLAUDE_PROJECT_DIR: ROOT },
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    const capture = (chunk: Buffer) => {
+      // Drain both streams even when output is truncated; bound memory use.
+      if (output.length < LIMIT + 1) output += chunk.toString().slice(0, LIMIT + 1 - output.length);
+    };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    const kill = () => {
+      // Formatter wrappers such as npx can spawn descendants. Stop the whole
+      // process group on POSIX so cancellation cannot leave a writer behind.
+      try {
+        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch { child.kill("SIGKILL"); }
+    };
+    const cancel = () => { failure = "POISE: hook cancelled."; kill(); };
+    signal?.addEventListener("abort", cancel, { once: true });
+    const timer = setTimeout(() => {
+      failure = `POISE: ${command} timed out after ${TIMEOUT_MS / 1000}s.`;
+      kill();
+    }, TIMEOUT_MS);
+    child.on("error", (error) => { failure = `POISE: cannot run ${command}: ${error.message}`; });
+    child.stdin.on("error", () => { /* EPIPE: process may have exited before reading. */ });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      done({ code: failure ? 1 : code ?? 1, output: bounded([output.trim(), failure].filter(Boolean).join("\n")) });
+    });
+    child.stdin.end(payload === undefined ? "" : JSON.stringify(payload));
+  });
+}
+function script(name: string, payload?: unknown, args: string[] = [], signal?: AbortSignal): Promise<Result> {
+  return run("python3", [resolve(ROOT, "scripts", name), ...args], payload, signal);
+}
+function feedback(result: Result, label: string): string {
+  if (!result.code) return result.output;
+  return `${result.output}\nREMEDIATION: ${label} failed (exit ${result.code}). Fix the reported issue; ` +
+    "install missing tools using docs/workflows.md, then rerun the check.";
+}
+function serial() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    const next = tail.then(work, work);
+    tail = next.catch(() => {});
+    return next;
+  };
+}
+function sourcePath(input: Record<string, unknown>, cwd: string): string | undefined {
+  if (typeof input.path !== "string") return undefined;
+  const path = resolve(cwd, input.path);
+  // Resolve the parent for new files too; do not format/gate paths outside the
+  // harness root, including symlink escapes. The harness is not a sandbox.
+  let canonical: string;
+  try { canonical = realpathSync(path); }
+  catch {
+    // Find the nearest existing ancestor, even when several parent directories
+    // are new. This catches escapes through an existing symlink ancestor.
+    let parent = dirname(path);
+    canonical = path;
+    while (true) {
+      try { canonical = resolve(realpathSync(parent), relative(parent, path)); break; }
+      catch { const next = dirname(parent); if (next === parent) break; parent = next; }
+    }
+  }
+  const rel = relative(ROOT, canonical);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined;
+  return canonical;
+}
+
+export default function (pi: ExtensionAPI) {
+  const gate = serial();
+  const checks = serial();
+
+  pi.on("session_start", async () => {
+    if (process.env.POISE_BRIEF === "0") return;
+    const result = await script("session_brief.py");
+    const content = feedback(result, "Session brief");
+    if (content) pi.sendMessage({ customType: "poise-brief", content, display: true }, { triggerTurn: false });
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    // Refresh rules + live plan each run, including after resume/tree navigation
+    // or compaction. Return a context message, never replace Pi's system prompt.
+    const parts: string[] = [];
+    if (process.env.POISE_BRIEF !== "0") {
+      parts.push(feedback(await script("session_brief.py", undefined, [], ctx.signal), "Session brief"));
+    }
+    if (process.env.POISE_NUDGE_PLAN !== "0") {
+      parts.push(feedback(await script("nudge_plan.py", { prompt: event.prompt }, [], ctx.signal), "Plan reminder"));
+    }
+    const content = parts.filter(Boolean).join("\n\n");
+    if (content) return { message: { customType: "poise-context", content: bounded(content), display: false } };
+  });
+
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "bash" || event.toolName === "powershell") {
+      const command = typeof event.input.command === "string" ? event.input.command : "";
+      if (DANGEROUS.some((pattern) => pattern.test(command))) {
+        return { block: true, reason: "BLOCKED: dangerous command pattern. " +
+          "REMEDIATION: use the safe workflow in docs/workflows.md; if intentional, run it manually outside Pi." };
+      }
+      if (SECRETS.some((pattern) => pattern.test(command))) {
+        // Do not echo the command: it may already contain a literal secret.
+        return { block: true, reason: "BLOCKED: potential secret exposure. " +
+          "REMEDIATION: avoid printing credentials; see docs/conventions.md#secrets." };
+      }
+      return;
+    }
+    if (!["write", "edit"].includes(event.toolName) || process.env.POISE_GATE === "0") return;
+    const path = sourcePath(event.input, ctx.cwd);
+    if (!path) return;
+    const session = createHash("sha256").update(ROOT + "\0" + ctx.sessionManager.getSessionId()).digest("hex");
+    // require_plan.py uses a read/modify/write state file. Serialize calls so
+    // parallel edits cannot each observe an outdated source-file count.
+    return gate(async () => {
+      const result = await script("require_plan.py", {
+        session_id: `pi-${session}`, tool_input: { file_path: path },
+      }, ["--pretooluse"], ctx.signal);
+      if (result.code) return { block: true, reason: feedback(result, "Plan gate") };
+    });
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.isError || !["write", "edit"].includes(event.toolName)) return;
+    const path = sourcePath(event.input, ctx.cwd);
+    if (!path) return;
+    const rel = relative(ROOT, path).replaceAll(sep, "/");
+    if (rel.startsWith("docs/")) return;
+    const messages = await checks(() => withFileMutationQueue(path, async () => {
+      const output: string[] = [];
+      for (const check of CHECKS) {
+        if (!check.extensions.some((ext) => path.endsWith(ext))) continue;
+        const args = check.args.map((arg) => arg.replaceAll("{file}", path));
+        output.push(feedback(await run(check.command, args, undefined, ctx.signal), check.command));
+      }
+      if (ARCHITECTURE?.extensions.some((ext) => path.endsWith(ext))) {
+        const args = ARCHITECTURE.args.map((arg) => arg.replaceAll("{file}", path));
+        output.push(feedback(await run(ARCHITECTURE.command, args, undefined, ctx.signal), "Architecture check"));
+      } else if (/\.(py|ts|tsx|js|jsx|go|rs|java|kt|rb)$/.test(path)) {
+        output.push("POISE: architecture boundaries are NOT checked for this file type. " +
+          "REMEDIATION: configure a language-specific architecture checker in .pi/extensions/harness.ts; " +
+          "see docs/architecture.md#layer-model.");
+      }
+      output.push(feedback(await script("check_style.py", undefined, [path], ctx.signal), "Style check"));
+      return output.filter(Boolean).join("\n\n");
+    }));
+    if (messages) return {
+      content: [...event.content, { type: "text", text: bounded(`POISE POST-WRITE CHECKS:\n${messages}`) }],
+      // Keep the tool's success status: edits happened, even if lint failed.
+      structuredContent: event.structuredContent,
+    };
+  });
+
+  pi.on("agent_before_settle", async (event, ctx) => {
+    if (event.outcome !== "completed") return;
+    const parts: string[] = [];
+    parts.push(feedback(await run("python3", [resolve(ROOT, ".pi/hooks/archive_plans.py")], undefined, ctx.signal), "Plan archival"));
+    if (process.env.POISE_NUDGE_DOCS !== "0") {
+      parts.push(feedback(await script("nudge_docs.py", undefined, [], ctx.signal), "Docs reminder"));
+    }
+    const content = parts.filter(Boolean).join("\n\n");
+    if (content) return {
+      entries: [{ type: "custom_message", customType: "poise-stop", content: bounded(content), display: true }],
+      // Advisory: retain in context for the next run, do not cause a loop or
+      // spend another model request merely to acknowledge a docs reminder.
+    };
+  });
+}

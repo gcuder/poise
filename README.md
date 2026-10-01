@@ -4,10 +4,10 @@
 
 ### Stop babysitting your coding agent.
 
-**One command turns any repo into a guided environment for Claude Code, Codex, or OpenCode** — `AGENTS.md`, boundary linters, plan gates, and feedback hooks, all generated and tailored to your codebase.
+**One command turns any repo into a guided environment for Claude Code, Codex, OpenCode, or Pi** — `AGENTS.md`, boundary linters, plan gates, and feedback hooks, all generated and tailored to your codebase.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20·%20Codex%20·%20OpenCode-8A2BE2.svg)](#-supported-agents)
+[![Agents](https://img.shields.io/badge/agents-Claude%20Code%20·%20Codex%20·%20OpenCode%20·%20Pi-8A2BE2.svg)](#-supported-agents)
 [![Harness engineering](https://img.shields.io/badge/built%20for-harness%20engineering-000.svg)](https://openai.com/index/harness-engineering/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -50,13 +50,14 @@ Copies the skill into every supported agent's skills directory in one shot:
 
 - `~/.claude/skills/poise/` — picked up by both **Claude Code** and **OpenCode** (OpenCode reads `.claude/skills/` natively).
 - `~/.codex/skills/poise/` — picked up by **Codex** (honors `$CODEX_HOME`). Codex loads skill metadata on launch, so **restart Codex** after installing.
+- `~/.pi/agent/skills/poise/` — picked up by **Pi** (honors `$PI_CODING_AGENT_DIR`). Run `/reload` after installing, then `/skill:harness-generator generate harness for this repo`.
 
 Keeping it fresh:
 
 ```bash
-make sync          # re-copy after a git pull (restarts Codex if you use it)
+make sync          # re-copy after a git pull; restart Codex / run /reload in Pi
 make install-check # report which install dirs are in sync, drifted, or missing
-make uninstall     # remove both install dirs (prompts unless FORCE=1)
+make uninstall     # remove all three install dirs (prompts unless FORCE=1)
 ```
 
 Prefer not to install? Hand `poise/SKILL.md` to any agent directly:
@@ -140,6 +141,15 @@ WORKFLOW.md                     # Symphony-compatible workflow definition
 └── commands/                   # /sync-docs, /plan
 ```
 
+### Pi adapter
+
+```
+.pi/
+├── extensions/harness.ts       # native lifecycle/tool hooks; feedback in context
+├── hooks/archive_plans.py      # collision-safe completed-plan archival
+└── prompts/                   # /sync-docs, /plan <task>
+```
+
 </details>
 
 ---
@@ -192,8 +202,33 @@ Every layer is a single env var away from off (`POISE_BRIEF=0`, `POISE_NUDGE_PLA
 | [Claude Code](https://claude.ai/code) | `AGENTS.md` + `CLAUDE.md` | `.claude/settings.json` — SessionStart / Pre+PostToolUse / UserPromptSubmit / Stop | `.claude/commands/` |
 | [Codex](https://openai.com/codex) | `AGENTS.md` | `.codex/config.toml` + `WORKFLOW.md` (Symphony-compatible) | — |
 | [OpenCode](https://opencode.ai) | `AGENTS.md` | `.opencode/plugins/harness.ts` — tool.execute / session.idle | `.opencode/commands/` |
+| [Pi](https://pi.dev) (0.99.2+) | `AGENTS.md` | `.pi/extensions/harness.ts` — native session, prompt, tool, and settlement events | `.pi/prompts/` |
 
 All agents share the same core harness. Agent-specific files are purely additive — [add a new one](CONTRIBUTING.md) with a single directory.
+
+### Using Pi
+
+After generation, review `.pi/extensions/harness.ts`, start Pi at the repo root,
+grant project trust, and run `/reload`. The extension refreshes the rules and
+active plan before each run, blocks the third distinct source-file edit without
+a plan, and appends formatter/linter feedback directly to tool results. It
+archives fully checked plans without overwriting history; docs reminders do
+not force extra model requests. `/plan <task>` and `/sync-docs` are native
+prompt templates.
+
+Print/RPC automation requires saved project trust or an explicit reviewed
+`--approve`, e.g. `pi --approve -p "<task>"`. Declining trust or disabling
+extensions disables these hooks. Requires Pi 0.99.2+ with the
+`@earendil-works/pi-coding-agent` API, Python 3.10+, and the repo's check tools.
+Older `@mariozechner/pi-coding-agent` builds need a compatibility adapter.
+
+The edit gate covers built-in write/edit (including nested calls through Pi's
+tool execution API), not arbitrary shell/custom/MCP mutations. Command-pattern
+guards are heuristics, **not a sandbox**; keep Git hooks and CI enabled.
+The core architecture checker parses Python imports only: other languages need
+a language-specific checker or must report that boundary coverage is missing.
+See the [Pi adapter guide](poise/templates/agents/pi/ADAPTER.md) for configuration,
+concurrency, escape hatches, and limitations.
 
 ---
 
