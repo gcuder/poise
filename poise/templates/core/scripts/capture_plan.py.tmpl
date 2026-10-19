@@ -93,6 +93,9 @@ def main() -> int:
     except Exception:  # never fail the hook over an index refresh
         pass
     print(f"[poise] active plan: docs/exec-plans/active/{slug}.md")
+    if not out.get("tags"):
+        print("[poise] add `tags: [...]` to its frontmatter — pick them from what the "
+              "plan touches and reuse tags already used in docs/.")
     return 0
 
 

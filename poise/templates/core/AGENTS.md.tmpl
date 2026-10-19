@@ -91,6 +91,7 @@ Code's plan mode, the `ExitPlanMode` hook writes it to
 `{{PLAN_CMD}}` command is a manual fallback for agents without plan mode.
 
 `docs/` is an OKF knowledge bundle: each doc starts with YAML frontmatter
-(`type`, `title`, `description`, `generated`). Keep it accurate; `make check-docs`.
+(`type`, `title`, `description`, `tags`, `generated`). Pick tags per doc from its
+content, reusing tags already in docs/. Keep it accurate; `make check-docs`.
 
 Completed plans: [docs/exec-plans/completed/](docs/exec-plans/completed/)

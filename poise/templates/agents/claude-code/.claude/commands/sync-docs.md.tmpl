@@ -35,6 +35,8 @@ Read-only analysis pass. No code changes. Produce a drift report and stop.
 
 7. Knowledge freshness (docs/ is an OKF bundle — see `docs/index.md`):
    - Does each file's frontmatter `description` still match its content?
+   - Do its `tags` still match its content, and is the same thing tagged
+     the same way across docs?
    - Which concepts are unverified (no `verified` entry) yet relied on?
    - Which files changed meaningfully without a newer `generated.at`?
 

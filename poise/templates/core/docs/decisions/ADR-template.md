@@ -2,6 +2,7 @@
 type: Decision
 title: "ADR {{NUMBER}}: {{TITLE}}"
 description: {{ONE_LINE_SUMMARY}}
+tags: [{{TAGS}}]
 decision_status: {{proposed | accepted | superseded}}
 status: stable
 generated:

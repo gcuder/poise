@@ -2,6 +2,7 @@
 type: Exec Plan
 title: <Title>
 description: <one line — what done looks like>
+tags: [<tag>, <tag>]
 status: draft
 affects: [<module>, <module>]
 generated:

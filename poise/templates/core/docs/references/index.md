@@ -31,6 +31,7 @@ One markdown file per topic, each an OKF concept:
 type: Reference
 title: Anthropic SDK
 description: Python SDK docs and API reference for the Claude API.
+tags: [llm, sdk, api]
 resource: https://docs.anthropic.com/
 generated:
   by: human:you@example.com
