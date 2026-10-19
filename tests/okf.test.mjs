@@ -78,6 +78,9 @@ test('a freshly generated docs/ tree is a conformant OKF bundle', async (t) => {
   const after = w.py(['scripts/check_okf.py', '--fail-on-any']);
   assert.equal(after.status, 0, after.stdout);
   assert.match(after.stdout, /conformant/);
+  for (const doc of ['architecture', 'conventions', 'workflows', 'quality', 'decisions/001-approved-sdk']) {
+    assert.match(await w.read(`docs/${doc}.md`), /^---\n[\s\S]*\ntags: \[filled-tags\]\n[\s\S]*?\n---\n/, doc);
+  }
   const root = await w.read('docs/index.md');
   assert.match(root, /^---\nokf_version: "0.2"\n---/);
   assert.match(root, /- \[Architecture\]\(architecture.md\) — Layer model/);
@@ -133,6 +136,7 @@ test('approved plan is captured as a human-verified draft exec plan', async (t) 
   await w.put('plan-src.md', '# Ship the Widget API\n\n## Context\n\nCustomers need widgets.\n\n## Steps\n- [ ] build\n');
   const result = w.py(['scripts/capture_plan.py', '--source', 'plan-src.md', '--by', 'claude-code/plan-mode']);
   assert.match(result.stdout, /active plan: docs\/exec-plans\/active\/ship-the-widget-api.md/);
+  assert.match(result.stdout, /add `tags: \[\.\.\.\]` to its frontmatter/);
   const plan = await w.read('docs/exec-plans/active/ship-the-widget-api.md');
   assert.match(plan, /^---\ntype: Exec Plan\ntitle: Ship the Widget API\ndescription: Customers need widgets.\nstatus: draft\n/);
   assert.match(plan, /generated:\n  by: claude-code\/plan-mode\n  at: \d{4}-\d{2}-\d{2}T/);

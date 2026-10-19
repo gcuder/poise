@@ -2,6 +2,7 @@
 type: Product Spec
 title: <Feature>
 description: <one line — the problem this solves>
+tags: [<tag>, <tag>]
 status: draft
 generated:
   by: human:<you>

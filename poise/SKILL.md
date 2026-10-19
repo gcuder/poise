@@ -25,9 +25,16 @@ this file instead of regenerating from scratch.
 [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 bundle: each `.md` file except `index.md` / `log.md` starts with YAML
 frontmatter carrying at least `type`, plus `title`, a one-line `description`,
-and `generated: {by, at}`. When filling templates, set `POISE_VERSION` to this
+`tags`, and `generated: {by, at}`. When filling templates, set `POISE_VERSION` to this
 skill's `version` (frontmatter above), `GENERATED_AT` to the current UTC time
 (`2026-01-31T14:05:00Z` form), and `QUALITY_STALE_AFTER` to 90 days later.
+
+**Tags.** There is no fixed tag list. Choose `TAGS` for each doc from what that
+doc covers in this repo: the modules, layers, domain concepts and technologies
+it discusses (e.g. `[api, auth, postgres]` for an architecture doc of an auth
+service). Use 2–6 lowercase, hyphenated tags. Do not repeat the doc's `type` as
+a tag. Before inventing a tag, check the tags already in the bundle and reuse
+the same word for the same thing, so tags work as filters across docs.
 
 ---
 
@@ -364,8 +371,8 @@ OKF `status: deprecated`.
 Copy as-is (language-agnostic), including each `index.md` and `template.md`.
 Create empty `exec-plans/active/` and `exec-plans/completed/` directories.
 For each entry in `REFERENCES_SEED` (§1.9), write `docs/references/<slug>.md`
-with frontmatter `type: Reference`, `title`, `description`, `resource: <url>`,
-and `generated`, and a body of a few links (format shown in
+with frontmatter `type: Reference`, `title`, `description`, `tags`,
+`resource: <url>`, and `generated`, and a body of a few links (format shown in
 `references/index.md`).
 Sources: `templates/core/docs/exec-plans/`,
          `templates/core/docs/product-specs/`,
@@ -626,6 +633,8 @@ and the docs are migrated to OKF.
    `generated.by: process:poise-migrate` with no `verified` entry.
 7. **Classify leftovers.** For each `UNCLASSIFIED` file, ask the user for a
    `type` (or suggest one) and add frontmatter by hand.
+   Then add `tags` to every migrated doc, chosen from its content as described
+   under **Tags** at the top of this file. The migration does not set them.
 8. **Verify.** `make check-docs` must report `conformant`. Then `make gc`.
 9. **Handoff.** List what changed (scripts, adapters, docs migrated, files
    deleted) and suggest `git add -A docs scripts && git commit -m "chore:
