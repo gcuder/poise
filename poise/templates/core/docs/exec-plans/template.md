@@ -1,8 +1,15 @@
-# <Title>
+---
+type: Exec Plan
+title: <Title>
+description: <one line — what done looks like>
+status: draft
+affects: [<module>, <module>]
+generated:
+  by: human:<you>
+  at: <timestamp>
+---
 
-**Status**: active
-**Created**: <date>
-**Affects**: <comma-separated module names>
+# <Title>
 
 ## Goal
 

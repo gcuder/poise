@@ -33,7 +33,7 @@ export async function fixture(t, values = {}, transform = (source) => source) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), content);
   };
-  for (const name of ['_plans.py', 'session_brief.py', 'require_plan.py', 'nudge_plan.py', 'nudge_docs.py']) {
+  for (const name of ['_plans.py', '_okf.py', 'check_okf.py', 'archive_plans.py', 'session_brief.py', 'require_plan.py', 'nudge_plan.py', 'nudge_docs.py']) {
     await put(`scripts/${name}`, await render(join(repo, `poise/templates/core/scripts/${name}.tmpl`), { REPO_NAME: 'fixture' }));
   }
   const common = { REPO_NAME: 'fixture' };
@@ -49,7 +49,6 @@ export async function fixture(t, values = {}, transform = (source) => source) {
     LOGGER_HINT: 'use structured logging', NAMING_RULES_LIST: '', COMPONENT_RULES_LIST: '',
     SOURCE_EXTENSIONS_SET: '".py", ".ts", ".tsx", ".go", ".rs"',
   }));
-  await put('.pi/hooks/archive_plans.py', await render(join(adapter, '.pi/hooks/archive_plans.py.tmpl'), common));
   await put('.pi/extensions/harness.ts', transform(await render(join(adapter, '.pi/extensions/harness.ts.tmpl'), { ...extensionValues, ...values })));
   await put('AGENTS.md', '# Fixture\n\n## Read before you act\n- Read docs/architecture.md\n\n## Non-negotiable rules\n- Respect the layer model\n');
   await mkdir(join(root, 'docs/exec-plans/active'), { recursive: true });

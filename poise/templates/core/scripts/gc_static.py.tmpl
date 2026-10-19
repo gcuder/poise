@@ -9,8 +9,10 @@ covers what can be checked without taste.
 Triggers covered:
   - exec-plans where every checkbox is ticked → suggest moving to completed/
   - exec-plans older than STALE_PLAN_DAYS → flag
-  - docs/quality.md rows older than STALE_QUALITY_DAYS → flag
-  - broken intra-doc markdown links → flag
+  - OKF concepts past their `stale_after` → flag
+  - OKF conformance (frontmatter, `type`, index.md drift) → flag
+  - broken intra-doc markdown links → flag (advisory: OKF tolerates them,
+    they may point at knowledge not yet written)
 
 Usage:
     python scripts/gc_static.py                # write report to stdout
@@ -23,17 +25,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import check_okf  # noqa: E402
+
 STALE_PLAN_DAYS: int = 30
-STALE_QUALITY_DAYS: int = 90
 
 DOCS = REPO_ROOT / "docs"
 PLANS_ACTIVE = DOCS / "exec-plans" / "active"
-QUALITY = DOCS / "quality.md"
 
 CHECKBOX_OPEN = re.compile(r"^\s*-\s*\[\s\]", re.MULTILINE)
 CHECKBOX_DONE = re.compile(r"^\s*-\s*\[x\]", re.MULTILINE | re.IGNORECASE)
-DATE_IN_ROW = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)#]+)\)")
 
 
@@ -72,38 +74,18 @@ def check_stale_plans() -> list[str]:
     return findings
 
 
-def check_stale_quality() -> list[str]:
-    if not QUALITY.exists():
-        return []
-    findings: list[str] = []
-    today = datetime.utcnow().date()
-    for lineno, line in enumerate(QUALITY.read_text(errors="ignore").splitlines(), 1):
-        match = DATE_IN_ROW.search(line)
-        if not match:
-            continue
-        try:
-            row_date = datetime.strptime(match.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        age = (today - row_date).days
-        if age > STALE_QUALITY_DAYS:
-            findings.append(
-                f"QUALITY_STALE: docs/quality.md:{lineno} — "
-                f"row dated {row_date} ({age}d old, >{STALE_QUALITY_DAYS}d)"
-            )
-    return findings
-
-
 def check_broken_links() -> list[str]:
     if not DOCS.exists():
         return []
     findings: list[str] = []
-    for md in DOCS.rglob("*.md"):
+    for md in check_okf._okf.iter_markdown(DOCS):
         for match in MD_LINK.finditer(md.read_text(errors="ignore")):
             target = match.group(1).strip()
             if target.startswith(("http://", "https://", "mailto:")):
                 continue
-            resolved = (md.parent / target).resolve()
+            # OKF bundle-absolute links (`/architecture.md`) resolve from docs/.
+            base = DOCS if target.startswith("/") else md.parent
+            resolved = (base / target.lstrip("/")).resolve()
             if not resolved.exists():
                 findings.append(
                     f"BROKEN_LINK: {md.relative_to(REPO_ROOT)} → {target}"
@@ -117,8 +99,10 @@ def main() -> int:
     sections = [
         ("Completed plans (move to completed/)", check_fully_ticked_plans()),
         ("Stale plans (mtime)",                  check_stale_plans()),
-        ("Stale quality.md rows",                check_stale_quality()),
-        ("Broken doc links",                     check_broken_links()),
+        ("Stale knowledge (stale_after)",        check_okf.stale_findings(DOCS)),
+        ("OKF conformance",                      check_okf.conformance_findings(DOCS)
+                                                 + check_okf.index_findings(DOCS)),
+        ("Broken doc links (advisory)",          check_broken_links()),
     ]
 
     total = sum(len(findings) for _, findings in sections)

@@ -203,7 +203,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_before_settle", async (event, ctx) => {
     if (event.outcome !== "completed") return;
     const parts: string[] = [];
-    parts.push(feedback(await run("python3", [resolve(ROOT, ".pi/hooks/archive_plans.py")], undefined, ctx.signal), "Plan archival"));
+    parts.push(feedback(await script("archive_plans.py", undefined, [], ctx.signal), "Plan archival"));
     if (process.env.POISE_NUDGE_DOCS !== "0") {
       parts.push(feedback(await script("nudge_docs.py", undefined, [], ctx.signal), "Docs reminder"));
     }

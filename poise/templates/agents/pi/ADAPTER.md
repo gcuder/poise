@@ -4,8 +4,7 @@
 
 | Generated file | Purpose |
 |---|---|
-| `.pi/extensions/harness.ts` | Native session brief, prompt reminders, edit gate, command guard, post-write feedback, and end-of-run reminders |
-| `.pi/hooks/archive_plans.py` | Archives fully checked plans using the core `_plans.py` parser; never overwrites history |
+| `.pi/extensions/harness.ts` | Native session brief, prompt reminders, edit gate, command guard, post-write feedback, and end-of-run reminders; archives finished plans via the core `scripts/archive_plans.py` (never overwrites history) |
 | `.pi/prompts/plan.md` | `/plan <task>` — create a versioned plan and ask for approval |
 | `.pi/prompts/sync-docs.md` | `/sync-docs` — read-only drift audit |
 

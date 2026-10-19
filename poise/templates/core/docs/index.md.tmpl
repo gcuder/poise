@@ -1,0 +1,16 @@
+---
+okf_version: "0.2"
+---
+
+# {{REPO_NAME}} knowledge base
+
+This directory is an [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+bundle. Every file except `index.md` and `log.md` starts with YAML
+frontmatter carrying at least `type`, plus `title`, `description` and
+`generated: {by, at}`. Add `verified: [{by: human:<email>, at}]` when a person
+confirms a document, and `stale_after` when it needs periodic review.
+
+Run `make check-docs` to check conformance and `make docs-index` to refresh
+the listings below.
+
+<!-- okf:listing -->

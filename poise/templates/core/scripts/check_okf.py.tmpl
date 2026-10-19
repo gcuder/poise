@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+OKF v0.2 conformance check for {{REPO_NAME}}'s docs/ bundle.
+
+Advisory: exits 0 unless --fail-on-any is passed. Every finding ends in a
+REMEDIATION line so an agent can fix it in the same turn.
+
+Checks:
+  - every non-reserved .md has a parseable frontmatter block with `type`
+  - legacy (pre-OKF) poise docs → points at `make migrate-docs`
+  - `status` is draft | stable | deprecated when present
+  - index.md carries no frontmatter (root may carry only okf_version)
+  - index.md listings match the files on disk
+  - log.md date headings are ISO YYYY-MM-DD
+  - concepts past `stale_after`
+
+Usage:
+    python scripts/check_okf.py                # report, exit 0
+    python scripts/check_okf.py --fail-on-any  # exit 1 if anything flagged
+    python scripts/check_okf.py --write-index  # regenerate index.md listings first
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _okf  # noqa: E402
+
+LEGACY_HINT = re.compile(r"^\*\*(Status|Created|Completed|Date)\*\*:", re.MULTILINE)
+LOG_HEADING = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _rel(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(_okf.project_dir().resolve()))
+    except ValueError:
+        return str(path)
+
+
+# ── conformance ──────────────────────────────────────────────────────────
+
+def conformance_findings(docs: Path | None = None) -> list[str]:
+    docs = docs or _okf.docs_dir()
+    findings: list[str] = []
+    for path in _okf.iter_concepts(docs):
+        text = path.read_text(errors="ignore")
+        try:
+            meta, _ = _okf.split(text)
+        except ValueError as error:
+            findings.append(
+                f"OKF_BAD_FRONTMATTER: {_rel(path)} — {error}. "
+                "REMEDIATION: fix the YAML between the leading '---' lines."
+            )
+            continue
+        if meta is None:
+            if path.name == "README.md" or LEGACY_HINT.search(text):
+                findings.append(
+                    f"OKF_LEGACY: {_rel(path)} — pre-OKF poise format. "
+                    "REMEDIATION: run `make migrate-docs` (dry run), then "
+                    "`make migrate-docs APPLY=1`."
+                )
+            else:
+                findings.append(
+                    f"OKF_NO_FRONTMATTER: {_rel(path)} — missing frontmatter. "
+                    "REMEDIATION: start the file with a '---' block containing at "
+                    "least `type:` (see docs/index.md), or run `make migrate-docs`."
+                )
+            continue
+        if not str(meta.get("type", "")).strip():
+            findings.append(
+                f"OKF_NO_TYPE: {_rel(path)} — frontmatter has no `type`. "
+                "REMEDIATION: add `type: <kind>` (e.g. Decision, Exec Plan, Reference)."
+            )
+        status = meta.get("status")
+        if status and status not in _okf.STATUSES:
+            findings.append(
+                f"OKF_BAD_STATUS: {_rel(path)} — status {status!r}. "
+                "REMEDIATION: use draft, stable or deprecated; put other states "
+                "in a separate key (e.g. decision_status)."
+            )
+    for path in _okf.iter_markdown(docs):
+        if path.name == "index.md":
+            findings.extend(_index_frontmatter_findings(path, path.parent == docs))
+        elif path.name == "log.md":
+            findings.extend(_log_findings(path))
+    return findings
+
+
+def _index_frontmatter_findings(path: Path, is_root: bool) -> list[str]:
+    meta, _ = _okf.read(path)
+    if meta is None:
+        return []
+    if is_root and set(meta) <= {"okf_version"}:
+        return []
+    return [
+        f"OKF_INDEX_FRONTMATTER: {_rel(path)} — index.md must not carry "
+        "frontmatter (only the bundle root may set okf_version). "
+        "REMEDIATION: move these fields into a concept file."
+    ]
+
+
+def _log_findings(path: Path) -> list[str]:
+    text = path.read_text(errors="ignore")
+    bad = [h for h in LOG_HEADING.findall(text) if not ISO_DATE.match(h.strip())]
+    if not bad:
+        return []
+    return [
+        f"OKF_LOG_FORMAT: {_rel(path)} — non-date headings {bad[:3]}. "
+        "REMEDIATION: group entries under `## YYYY-MM-DD` headings, newest first."
+    ]
+
+
+def stale_findings(docs: Path | None = None) -> list[str]:
+    docs = docs or _okf.docs_dir()
+    findings: list[str] = []
+    for path in _okf.iter_concepts(docs):
+        meta, _ = _okf.read(path)
+        if meta and _okf.is_stale(meta):
+            findings.append(
+                f"OKF_STALE: {_rel(path)} — past stale_after {meta.get('stale_after')}. "
+                "REMEDIATION: review the content, then bump `stale_after` and "
+                "add a `verified` entry."
+            )
+    return findings
+
+
+# ── index.md ─────────────────────────────────────────────────────────────
+
+def _entry(path: Path, base: Path) -> str:
+    meta, body = _okf.read(path)
+    meta = meta or {}
+    title = meta.get("title") or _okf.first_title(body) or path.stem
+    desc = meta.get("description") or ""
+    link = path.relative_to(base).as_posix()
+    return f"- [{title}]({link})" + (f" — {desc}" if desc else "")
+
+
+def _dir_summary(directory: Path) -> str:
+    index = directory / "index.md"
+    if index.exists():
+        _, body = _okf.read(index)
+        intro = body.split(_okf.LISTING_MARKER, 1)[0]
+        return _okf.first_paragraph(intro) or ""
+    return ""
+
+
+def _concepts_in(directory: Path) -> list[Path]:
+    return [p for p in sorted(directory.glob("*.md")) if p.name not in _okf.RESERVED]
+
+
+def render_listing(directory: Path, is_root: bool) -> str:
+    """The generated part of an index.md (everything below the marker)."""
+    out: list[str] = []
+    files = _concepts_in(directory)
+    if files:
+        out.append("## Concepts" if is_root else "## Files")
+        out.extend(_entry(p, directory) for p in files)
+        out.append("")
+    subdirs = [d for d in sorted(directory.iterdir())
+               if d.is_dir() and not d.name.startswith(".") and _okf.iter_markdown(d)]
+    if is_root and subdirs:
+        out.append("## Directories")
+        for d in subdirs:
+            summary = _dir_summary(d)
+            out.append(f"- [{d.name}/]({d.name}/index.md)" + (f" — {summary}" if summary else ""))
+        out.append("")
+    elif not is_root:
+        # Nested directories (e.g. exec-plans/active) are listed inline as
+        # sections, so creating a plan never needs a new index.md.
+        for d in subdirs:
+            nested = _okf.iter_concepts(d)
+            out.append(f"## {d.name}")
+            out.extend([_entry(p, directory) for p in nested] or ["- (none)"])
+            out.append("")
+    if not out:
+        out = ["- (empty)", ""]
+    return "\n".join(out)
+
+
+def _index_dirs(docs: Path) -> list[Path]:
+    return [docs] + [d for d in sorted(docs.iterdir())
+                     if d.is_dir() and not d.name.startswith(".") and _okf.iter_markdown(d)]
+
+
+def _expected_index(index: Path, is_root: bool) -> str:
+    current = index.read_text(errors="ignore") if index.exists() else ""
+    if _okf.LISTING_MARKER in current:
+        intro = current.split(_okf.LISTING_MARKER, 1)[0].rstrip() + "\n\n"
+    elif is_root:
+        intro = (f'---\nokf_version: "{_okf.OKF_VERSION}"\n---\n\n# Knowledge base\n\n'
+                 "This directory is an OKF v0.2 bundle "
+                 "(https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).\n\n")
+    else:
+        intro = f"# {index.parent.name}\n\n"
+    return intro + _okf.LISTING_MARKER + "\n\n" + render_listing(index.parent, is_root)
+
+
+def index_findings(docs: Path | None = None) -> list[str]:
+    docs = docs or _okf.docs_dir()
+    findings: list[str] = []
+    if not docs.exists():
+        return findings
+    for directory in _index_dirs(docs):
+        index = directory / "index.md"
+        if not index.exists():
+            findings.append(
+                f"OKF_INDEX_MISSING: {_rel(index)}. REMEDIATION: run `make docs-index`."
+            )
+        elif index.read_text(errors="ignore") != _expected_index(index, directory == docs):
+            findings.append(
+                f"OKF_INDEX_STALE: {_rel(index)} — listing differs from the files "
+                "on disk. REMEDIATION: run `make docs-index`."
+            )
+    return findings
+
+
+def write_indexes(docs: Path | None = None, only_existing: bool = False) -> list[Path]:
+    """Regenerate index.md listings. With only_existing, touch only index files
+    that already carry the listing marker (safe for hooks on legacy repos)."""
+    docs = docs or _okf.docs_dir()
+    written: list[Path] = []
+    if not docs.exists():
+        return written
+    for directory in _index_dirs(docs):
+        index = directory / "index.md"
+        if only_existing and not (index.exists()
+                                  and _okf.LISTING_MARKER in index.read_text(errors="ignore")):
+            continue
+        expected = _expected_index(index, directory == docs)
+        if not index.exists() or index.read_text(errors="ignore") != expected:
+            try:
+                index.write_text(expected)
+                written.append(index)
+            except OSError:
+                continue
+    return written
+
+
+def main() -> int:
+    if "--write-index" in sys.argv:
+        for path in write_indexes():
+            print(f"wrote {_rel(path)}")
+    findings = conformance_findings() + index_findings() + stale_findings()
+    for finding in findings:
+        print(finding)
+    if not findings:
+        print("OKF: docs/ bundle is conformant.")
+    return 1 if ("--fail-on-any" in sys.argv and findings) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

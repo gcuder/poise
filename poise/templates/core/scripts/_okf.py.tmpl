@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+"""
+Shared OKF (Open Knowledge Format v0.2) helpers for {{REPO_NAME}}.
+
+docs/ is an OKF bundle: every non-reserved .md file starts with a YAML
+frontmatter block carrying at least `type`. Spec:
+https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
+
+Imported by check_okf.py, archive_plans.py, capture_plan.py, migrate_okf.py,
+gc_static.py and _plans.py so every caller reads and writes frontmatter the
+same way.
+
+Standard library only — target repos may not have PyYAML. The parser covers
+the YAML subset OKF frontmatter uses: scalars, inline `[a, b]` lists, block
+lists, one level of nested mappings, and lists of mappings. Values stay
+strings. Unknown keys are preserved on round-trip.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+OKF_VERSION = "0.2"
+RESERVED = {"index.md", "log.md"}
+LISTING_MARKER = "<!-- okf:listing -->"
+STATUSES = {"draft", "stable", "deprecated"}
+
+# Path prefix (relative to docs/) → concept type. First match wins.
+TYPE_BY_PATH: list[tuple[str, str]] = [
+    ("architecture.md", "Architecture"),
+    ("conventions.md", "Conventions"),
+    ("workflows.md", "Workflow"),
+    ("quality.md", "Quality Register"),
+    ("decisions/", "Decision"),
+    ("exec-plans/", "Exec Plan"),
+    ("product-specs/", "Product Spec"),
+    ("references/", "Reference"),
+]
+
+LEGACY_LINE = re.compile(r"^\*\*(Status|Created|Completed|Affects|Date)\*\*:\s*(.*?)\s*$")
+TITLE_RE = re.compile(r"^#\s+(.*\S)\s*$")
+DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+# ── paths ────────────────────────────────────────────────────────────────
+
+def project_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def docs_dir() -> Path:
+    return project_dir() / "docs"
+
+
+def iter_markdown(root: Path) -> list[Path]:
+    """Every .md under root, skipping dotfiles/dot-dirs (e.g. .gc-report-*)."""
+    if not root.exists():
+        return []
+    out = []
+    for path in sorted(root.rglob("*.md")):
+        rel = path.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        out.append(path)
+    return out
+
+
+def iter_concepts(root: Path) -> list[Path]:
+    return [p for p in iter_markdown(root) if p.name not in RESERVED]
+
+
+def infer_type(rel: str) -> str | None:
+    for prefix, kind in TYPE_BY_PATH:
+        if rel == prefix or (prefix.endswith("/") and rel.startswith(prefix)):
+            return kind
+    return None
+
+
+# ── time ─────────────────────────────────────────────────────────────────
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def to_iso(value: str) -> str:
+    """Normalise a bare YYYY-MM-DD to an OKF timestamp (UTC midnight)."""
+    value = value.strip()
+    return f"{value}T00:00:00Z" if DATE_ONLY.match(value) else value
+
+
+def parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = to_iso(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+# ── frontmatter parse / dump ─────────────────────────────────────────────
+
+def _scalar(raw: str) -> object:
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        return [_scalar(part) for part in inner.split(",")] if inner else []
+    if raw.startswith("{") and raw.endswith("}"):
+        inner = raw[1:-1].strip()
+        out: dict = {}
+        for part in inner.split(",") if inner else []:
+            key, _, val = part.partition(":")
+            out[key.strip()] = _scalar(val)
+        return out
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        if raw[0] == '"':
+            try:
+                return json.loads(raw)
+            except ValueError:
+                pass
+        return raw[1:-1]
+    if " #" in raw:
+        raw = raw.split(" #", 1)[0].rstrip()
+    return raw
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _parse_block(lines: list[str], start: int, indent: int) -> tuple[object, int]:
+    """Parse a nested block (mapping or list) whose lines are indented > indent."""
+    i = start
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or _indent(lines[i]) <= indent:
+        return "", i
+    child = _indent(lines[i])
+    if lines[i].strip().startswith("- "):
+        items: list = []
+        while i < len(lines) and lines[i].strip() and _indent(lines[i]) == child \
+                and lines[i].strip().startswith("- "):
+            first = lines[i].strip()[2:]
+            if re.match(r"^[\w.-]+:(\s|$)", first):
+                item: dict = {}
+                key, _, val = first.partition(":")
+                item[key.strip()] = _scalar(val)
+                i += 1
+                while i < len(lines) and lines[i].strip() and _indent(lines[i]) > child \
+                        and not lines[i].strip().startswith("- "):
+                    k, _, v = lines[i].strip().partition(":")
+                    item[k.strip()] = _scalar(v)
+                    i += 1
+                items.append(item)
+            else:
+                items.append(_scalar(first))
+                i += 1
+        return items, i
+    mapping: dict = {}
+    while i < len(lines) and lines[i].strip() and _indent(lines[i]) == child:
+        key, sep, val = lines[i].strip().partition(":")
+        if not sep:
+            raise ValueError(f"expected 'key: value', got {lines[i].strip()!r}")
+        i += 1
+        if val.strip():
+            mapping[key.strip()] = _scalar(val)
+        else:
+            mapping[key.strip()], i = _parse_block(lines, i, child)
+    return mapping, i
+
+
+def parse(block: str) -> dict:
+    """Parse frontmatter YAML (subset). Raises ValueError on malformed input."""
+    lines = [l.rstrip() for l in block.splitlines() if not l.lstrip().startswith("#")]
+    meta: dict = {}
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        if _indent(line) != 0:
+            raise ValueError(f"unexpected indentation: {line.strip()!r}")
+        key, sep, val = line.partition(":")
+        if not sep or not key.strip():
+            raise ValueError(f"expected 'key: value', got {line.strip()!r}")
+        i += 1
+        if val.strip():
+            meta[key.strip()] = _scalar(val)
+        else:
+            meta[key.strip()], i = _parse_block(lines, i, 0)
+    return meta
+
+
+def split(text: str) -> tuple[dict | None, str]:
+    """(meta, body). meta is None when the file has no frontmatter block.
+    Raises ValueError when a block exists but cannot be parsed."""
+    if not text.startswith("---"):
+        return None, text
+    lines = text.splitlines(keepends=True)
+    if lines[0].strip() != "---":
+        return None, text
+    for end in range(1, len(lines)):
+        if lines[end].strip() == "---":
+            meta = parse("".join(lines[1:end]))
+            return meta, "".join(lines[end + 1:])
+    raise ValueError("frontmatter block is not closed with '---'")
+
+
+def _quote(value: object) -> str:
+    # Plain YAML scalars allow `human:x` and ISO timestamps; quote only what
+    # YAML would misread (": ", " #", leading indicators, flow characters).
+    text = str(value)
+    if text == "" or text != text.strip() or ": " in text or " #" in text \
+            or text.endswith(":") or re.search(r"[\[\]{},]", text) \
+            or text[0] in "&*!|>'\"%@`-?#" \
+            or text.lower() in {"true", "false", "null", "yes", "no", "~"}:
+        return json.dumps(text, ensure_ascii=False)
+    return text
+
+
+def dump(meta: dict) -> str:
+    out: list[str] = []
+    for key, value in meta.items():
+        if isinstance(value, dict):
+            out.append(f"{key}:")
+            out.extend(f"  {k}: {_quote(v)}" for k, v in value.items())
+        elif isinstance(value, list):
+            if not value:
+                out.append(f"{key}: []")
+                continue
+            out.append(f"{key}:")
+            for item in value:
+                if isinstance(item, dict):
+                    pairs = list(item.items())
+                    out.append(f"  - {pairs[0][0]}: {_quote(pairs[0][1])}")
+                    out.extend(f"    {k}: {_quote(v)}" for k, v in pairs[1:])
+                else:
+                    out.append(f"  - {_quote(item)}")
+        else:
+            out.append(f"{key}: {_quote(value)}")
+    return "---\n" + "\n".join(out) + "\n---\n"
+
+
+def join(meta: dict, body: str) -> str:
+    return dump(meta) + ("\n" if body and not body.startswith("\n") else "") + body
+
+
+def read(path: Path) -> tuple[dict | None, str]:
+    """Best-effort read: (None, body) on missing or malformed frontmatter."""
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return None, ""
+    try:
+        return split(text)
+    except ValueError:
+        return None, text
+
+
+# ── legacy (pre-OKF poise) format ────────────────────────────────────────
+
+def first_title(body: str) -> str | None:
+    for line in body.splitlines():
+        m = TITLE_RE.match(line)
+        if m:
+            return m.group(1)
+    return None
+
+
+def first_paragraph(body: str, limit: int = 160) -> str | None:
+    """First prose line after the H1 — used as a one-line description."""
+    in_comment = False
+    for line in body.splitlines():
+        s = line.strip()
+        if in_comment:
+            in_comment = "-->" not in s
+            continue
+        if s.startswith("<!--"):
+            in_comment = "-->" not in s
+            continue
+        if not s or s.startswith(("#", "|", "-", "*", ">", "```", "<", "{{")) or s[0].isdigit():
+            continue
+        return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+    return None
+
+
+def from_legacy(text: str, rel: str) -> tuple[dict, str]:
+    """Convert a pre-OKF poise doc into (meta, body).
+
+    Bold `**Status**: / **Created**: / **Completed**: / **Affects**: / **Date**:`
+    lines above the first `## ` heading move into frontmatter and are removed
+    from the body. Everything else in the body is kept byte-for-byte.
+    """
+    lines = text.splitlines(keepends=True)
+    legacy: dict[str, str] = {}
+    kept: list[str] = []
+    in_header = True
+    dropped = False
+    for line in lines:
+        if line.startswith("## "):
+            in_header = False
+        m = LEGACY_LINE.match(line.rstrip("\n")) if in_header else None
+        if m and m.group(1) not in legacy:
+            legacy[m.group(1)] = m.group(2)
+            dropped = True
+            continue
+        # Swallow the blank line that separated a removed line, so removal
+        # does not leave a double blank behind.
+        if dropped and not line.strip() and (not kept or not kept[-1].strip()):
+            dropped = False
+            continue
+        dropped = False
+        kept.append(line)
+    body = "".join(kept).lstrip("\n")
+
+    kind = infer_type(rel)
+    meta: dict = {"type": kind or "Document"}
+    title = first_title(body)
+    if title:
+        meta["title"] = title
+    desc = first_paragraph(body)
+    if desc:
+        meta["description"] = desc
+
+    status = legacy.get("Status", "").strip().lower()
+    if kind == "Exec Plan":
+        done = "Completed" in legacy or "/completed/" in f"/{rel}"
+        meta["status"] = "stable" if done else "draft"
+        if legacy.get("Affects"):
+            meta["affects"] = [a.strip() for a in legacy["Affects"].split(",") if a.strip()]
+        if legacy.get("Completed"):
+            meta["completed_at"] = to_iso(legacy["Completed"])
+    elif kind == "Decision" and status:
+        meta["decision_status"] = status
+        meta["status"] = "deprecated" if status == "superseded" else "stable"
+
+    created = legacy.get("Created") or legacy.get("Date")
+    meta["generated"] = {"by": "process:poise-migrate", "at": to_iso(created) if created else ""}
+    return meta, body
+
+
+def git_created_at(path: Path) -> str | None:
+    """ISO date of the commit that added `path`, or None outside git."""
+    try:
+        out = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--follow", "--format=%aI", "--", str(path)],
+            cwd=project_dir(), capture_output=True, text=True, timeout=10,
+        ).stdout.strip().splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out[-1] if out else None
+
+
+def git_user_email() -> str | None:
+    try:
+        out = subprocess.run(["git", "config", "user.email"], cwd=project_dir(),
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out or None
+
+
+# ── trust and lifecycle ──────────────────────────────────────────────────
+
+def verified_events(meta: dict) -> list[dict]:
+    """`verified` as a list; a bare mapping is a one-element list (OKF §3)."""
+    raw = meta.get("verified")
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return [e for e in raw if isinstance(e, dict)]
+    return []
+
+
+def trust_tier(meta: dict) -> str:
+    events = verified_events(meta)
+    if not events:
+        return "unverified"
+    if any(str(e.get("by", "")).startswith("human:") for e in events):
+        return "human-reviewed"
+    return "machine-confirmed"
+
+
+def is_stale(meta: dict, now: datetime | None = None) -> bool:
+    deadline = parse_time(meta.get("stale_after"))
+    return bool(deadline and (now or datetime.now(timezone.utc)) >= deadline)
+
+
+def update_file(path: Path, **changes: object) -> bool:
+    """Merge top-level keys into a file's frontmatter. False on any error."""
+    meta, body = read(path)
+    if meta is None:
+        return False
+    meta.update(changes)
+    try:
+        path.write_text(join(meta, body))
+    except OSError:
+        return False
+    return True

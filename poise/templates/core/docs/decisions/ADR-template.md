@@ -1,9 +1,15 @@
-# ADR {{NUMBER}}: {{TITLE}}
-
-**Date**: {{DATE}}
-**Status**: {{proposed | accepted | superseded}}
-
 ---
+type: Decision
+title: "ADR {{NUMBER}}: {{TITLE}}"
+description: {{ONE_LINE_SUMMARY}}
+decision_status: {{proposed | accepted | superseded}}
+status: stable
+generated:
+  by: poise/{{POISE_VERSION}}
+  at: {{GENERATED_AT}}
+---
+
+# ADR {{NUMBER}}: {{TITLE}}
 
 ## Context
 

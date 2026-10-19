@@ -1,4 +1,4 @@
-.PHONY: run test lint format check-arch check-style check gc plan deploy help
+.PHONY: run test lint format check-arch check-style check gc plan check-docs docs-index migrate-docs deploy help
 
 run:
 	{{RUN_CMD}}
@@ -35,7 +35,7 @@ check: check-arch check-style
 # the parts that require taste.
 gc:
 	@echo "Running deterministic gc sweep..."
-	{{GC_STATIC_CMD}} | tee docs/gc-report-$$(date +%Y%m%d).md
+	{{GC_STATIC_CMD}} | tee docs/.gc-report-$$(date +%Y%m%d).md
 	@echo "Static report saved."
 	@echo "For the judgment-required passes, run /sync-docs in your agent."
 
@@ -44,8 +44,22 @@ plan:
 ifndef name
 	$(error Usage: make plan name=<slug>)
 endif
-	@cp docs/exec-plans/template.md docs/exec-plans/active/$(name).md
+	@sed -e "s|<Title>|$(name)|g" -e "s|<timestamp>|$$(date -u +%Y-%m-%dT%H:%M:%SZ)|" \
+	     -e "s|<you>|$$(git config user.email || echo unknown)|" \
+	     docs/exec-plans/template.md > docs/exec-plans/active/$(name).md
 	@echo "Plan created: docs/exec-plans/active/$(name).md"
+
+# docs/ is an OKF v0.2 knowledge bundle. Advisory — not part of `check`.
+check-docs:
+	python3 scripts/check_okf.py
+
+# Regenerate the index.md listings from each file's frontmatter
+docs-index:
+	python3 scripts/check_okf.py --write-index
+
+# Upgrade docs/ written in the pre-OKF poise format. Dry run unless APPLY=1.
+migrate-docs:
+	python3 scripts/migrate_okf.py $(if $(APPLY),--apply,)
 
 deploy:
 	{{DEPLOY_CMD}}
@@ -57,6 +71,7 @@ help:
 	@echo "Test:     make test"
 	@echo "Quality:  make lint | make format | make check (arch + style)"
 	@echo "Harness:  make gc | make plan name=<slug>"
+	@echo "Docs:     make check-docs | make docs-index | make migrate-docs [APPLY=1]"
 	@echo "Deploy:   make deploy"
 
 # Language defaults:
