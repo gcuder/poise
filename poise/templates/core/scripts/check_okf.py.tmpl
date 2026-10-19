@@ -149,7 +149,7 @@ def _dir_summary(directory: Path) -> str:
 
 
 def _concepts_in(directory: Path) -> list[Path]:
-    return [p for p in sorted(directory.glob("*.md")) if p.name not in _okf.RESERVED]
+    return [p for p in _okf.iter_concepts(directory) if p.parent == directory]
 
 
 def render_listing(directory: Path, is_root: bool) -> str:

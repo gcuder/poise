@@ -192,6 +192,16 @@ test('index regeneration keeps the hand-written intro above the listing marker',
   assert.doesNotMatch(index, /stale listing/);
 });
 
+test('index listings skip dotfiles such as gitignored gc reports', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('docs/.gc-report-2026-10-19.md', '# GC report\n');
+  w.py(['scripts/check_okf.py', '--write-index']);
+  assert.doesNotMatch(await w.read('docs/index.md'), /gc-report/);
+  const after = w.py(['scripts/check_okf.py', '--fail-on-any']);
+  assert.equal(after.status, 0, after.stdout);
+});
+
 async function legacyTree(w) {
   await w.put('docs/architecture.md', '# Architecture\n\n## Overview\n\nA web app.\n');
   await w.put('docs/quality.md', '# Quality\n\nCurrent state of the codebase.\n');
