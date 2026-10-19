@@ -13,6 +13,8 @@
 
 </div>
 
+> **New: docs are now an [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog) knowledge bundle.** Every file poise generates in `docs/` follows Google's [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md): YAML frontmatter with `type`, `title`, `description`, provenance and trust fields, plus generated `index.md` listings. Already using poise? Ask your agent to "upgrade harness", or run `make migrate-docs` to preview the migration. See [Knowledge bundle (OKF)](#-knowledge-bundle-okf).
+
 ---
 
 ## The problem
@@ -100,11 +102,16 @@ scripts/
 ├── session_brief.py            # SessionStart brief: rules + active plan
 ├── require_plan.py             # plan gate: block multi-file edits until a plan exists
 ├── nudge_plan.py               # directive plan reminder + re-surfaces active plan
-└── nudge_docs.py               # docs-update reminder for wide-touching sessions
+├── nudge_docs.py               # docs-update reminder for wide-touching sessions
+├── check_okf.py                # OKF conformance check + index.md generator
+├── archive_plans.py            # finished plans → completed/ + log.md
+├── capture_plan.py             # approved plan-mode plan → active/ (OKF)
+└── migrate_okf.py              # upgrade pre-OKF docs in place (dry run by default)
 tests/
 ├── test_architecture.py        # structural arch tests enforced in CI
 └── test_style.py               # structural style tests enforced in CI
-docs/
+docs/                           # an OKF v0.2 knowledge bundle (YAML frontmatter per doc)
+├── index.md                    # bundle root: okf_version + generated listing
 ├── architecture.md             # layer diagram + module responsibilities
 ├── conventions.md              # coding patterns + style invariants (✅/❌ examples)
 ├── workflows.md                # setup, test, lint, deploy
@@ -114,6 +121,12 @@ docs/
 ├── product-specs/              # feature specs before implementation
 └── references/                 # external docs, runbooks, dashboards
 ```
+
+Every doc in `docs/` follows the [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md):
+frontmatter with `type`, `title`, `description` and `generated`, plus
+`verified` and `stale_after` where they apply. Repos harnessed by an older
+poise version can be upgraded with "upgrade harness", which runs
+`make migrate-docs`.
 
 ### Claude Code adapter
 
@@ -151,6 +164,37 @@ WORKFLOW.md                     # Symphony-compatible workflow definition
 ```
 
 </details>
+
+---
+
+## 📚 Knowledge bundle (OKF)
+
+poise writes `docs/` in the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog), an open spec from Google Cloud's knowledge-catalog project for knowledge that people and agents both read. Each doc carries frontmatter like this:
+
+```yaml
+---
+type: Exec Plan
+title: Add auth
+description: Users can log in with email and password.
+status: draft
+generated:
+  by: claude-code/plan-mode
+  at: 2026-10-19T09:00:00Z
+verified:
+  - by: human:dev@example.com
+    at: 2026-10-19T09:00:00Z
+---
+```
+
+Agents can filter docs by `type` and read the one-line `description` without opening the file. They can also tell whether a person confirmed the content (`verified` by a `human:` actor) and whether it is out of date (`stale_after`).
+
+| Command | What it does |
+|---|---|
+| `make check-docs` | Reports format problems with a fix for each. Advisory, never blocks. |
+| `make docs-index` | Regenerates every `index.md` listing from the frontmatter. |
+| `make migrate-docs` | Previews the upgrade of docs written by older poise versions. `APPLY=1` writes it. |
+
+Plans approved in plan mode are recorded as human-verified drafts. Finished plans become `status: stable` and get an entry in `docs/exec-plans/log.md`.
 
 ---
 

@@ -13,9 +13,12 @@ Read-only audit. Do not modify code or docs.
 5. Review docs/exec-plans/active/ for plans that appear complete.
 6. Check docs/decisions/ for references to moved or deleted modules.
 7. Review docs/product-specs/ and docs/references/ for stale pointers.
+8. docs/ is an OKF bundle: flag frontmatter `description`s that no longer match
+   their content, unverified concepts that are relied on, and edited files
+   without a newer `generated.at`.
 
 Produce a dated drift report with module mismatches, convention violations
-(file:line), stale quality entries, apparently complete plans, broken links,
+(file:line), stale quality entries, apparently complete plans, broken links, knowledge freshness,
 and prioritised recommended actions. Use the baseline as evidence, not a
 substitute for the judgment-required passes. Do not fix anything.
 

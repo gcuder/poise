@@ -7,9 +7,9 @@ Single source of truth for reading docs/exec-plans/active/ and the
 nudge_plan.py, and require_plan.py so every Python caller parses plans
 identically.
 
-NOTE: the checkbox anchors here (`^- [ ]` / `^- [x]`) must stay in sync
-with .claude/hooks/stop_check_plans.sh, which greps the same patterns to
-promote finished plans. If you change the convention, change both.
+Plans are OKF concepts (`type: Exec Plan`): the title comes from frontmatter
+`title`, falling back to the first H1. archive_plans.py reuses parse_plan, so
+the checkbox convention lives only here.
 
 Never raises into a hook — all file access is best-effort and returns
 empty results on error.
@@ -19,7 +19,11 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _okf  # noqa: E402
 
 UNCHECKED_RE = re.compile(r"^- \[ \]\s*(.*)$")
 CHECKED_RE = re.compile(r"^- \[[xX]\]\s*(.*)$")
@@ -37,7 +41,8 @@ def active_dir() -> Path:
 def iter_active_plans() -> list[Path]:
     """Active plan files, newest first. Empty list on any error."""
     try:
-        plans = [p for p in active_dir().glob("*.md") if p.is_file()]
+        plans = [p for p in active_dir().glob("*.md")
+                 if p.is_file() and p.name not in _okf.RESERVED]
     except OSError:
         return []
 
@@ -57,15 +62,13 @@ def has_active_plan() -> bool:
 
 def parse_plan(path: Path) -> dict:
     """Return {path, title, checked, unchecked, total, next_steps}."""
-    title = path.stem
+    meta, body = _okf.read(path)
+    title = str((meta or {}).get("title") or "").strip() or path.stem
     checked = 0
     unchecked_steps: list[str] = []
-    try:
-        lines = path.read_text(errors="ignore").splitlines()
-    except OSError:
-        lines = []
+    lines = body.splitlines()
 
-    got_title = False
+    got_title = bool(meta and meta.get("title"))
     for line in lines:
         if not got_title:
             m = TITLE_RE.match(line)

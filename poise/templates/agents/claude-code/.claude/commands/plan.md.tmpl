@@ -21,11 +21,18 @@ modules, requires an architectural decision, or introduces a new dependency.
 5. Create `docs/exec-plans/active/<slug>.md`:
 
 ```markdown
-# <Title>
+---
+type: Exec Plan
+title: <Title>
+description: <one line — what done looks like>
+status: draft
+affects: [<module>, <module>]
+generated:
+  by: claude-code/plan-command
+  at: <UTC timestamp, e.g. 2026-01-31T14:05:00Z>
+---
 
-**Status**: active
-**Created**: <date>
-**Affects**: <comma-separated module names>
+# <Title>
 
 ## Goal
 One paragraph. What done looks like. Be concrete.
@@ -52,4 +59,6 @@ Concrete, checkable criteria. Tests that must pass. Docs to update.
 ```
 
 6. Summarise the approach in one paragraph.
-   Ask the user to confirm before starting implementation.
+   Ask the user to confirm before starting implementation. Once they confirm,
+   add `verified: [{by: "human:<their git user.email>", at: <UTC timestamp>}]`
+   to the frontmatter.

@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+Capture an approved plan as an OKF exec plan for {{REPO_NAME}}.
+
+Called by Claude Code's PostToolUse hook on ExitPlanMode. ExitPlanMode's
+tool_input does not carry the plan content — the agent writes the plan to
+~/.claude/plans/<session-slug>.md during plan mode, and this script copies the
+newest one into docs/exec-plans/active/<slug>.md with OKF frontmatter.
+
+The slug comes from the plan's title so a refined plan overwrites the same
+active file. Approval in plan mode is a human confirmation, so the plan is
+recorded as `verified` by `human:<git user.email>` when that is known.
+Exits 0 always.
+
+Usage:
+    python scripts/capture_plan.py                     # newest ~/.claude/plans/*.md
+    python scripts/capture_plan.py --source plan.md --by codex/plan-mode
+"""
+from __future__ import annotations
+
+import re
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _okf  # noqa: E402
+
+PLANS_DIR = Path.home() / ".claude" / "plans"
+MAX_AGE_SECONDS = 3600  # approval can take minutes; skip plans from old sessions
+
+
+def _arg(name: str, default: str | None = None) -> str | None:
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return default
+
+
+def newest_plan() -> Path | None:
+    try:
+        plans = sorted(PLANS_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    if not plans or time.time() - plans[0].stat().st_mtime > MAX_AGE_SECONDS:
+        return None
+    return plans[0]
+
+
+def slugify(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60].rstrip("-")
+
+
+def main() -> int:
+    source = Path(_arg("--source")) if _arg("--source") else newest_plan()
+    if not source or not source.is_file():
+        return 0
+    try:
+        text = source.read_text(errors="ignore")
+        meta, body = _okf.split(text)
+    except (OSError, ValueError):
+        return 0
+    meta = meta or {}
+
+    title = str(meta.get("title") or _okf.first_title(body) or "").strip()
+    slug = slugify(title) or time.strftime("plan-%Y%m%d-%H%M%S")
+    now = _okf.now_iso()
+
+    out: dict = {"type": "Exec Plan"}
+    if title:
+        out["title"] = title
+    desc = meta.get("description") or _okf.first_paragraph(body)
+    if desc:
+        out["description"] = desc
+    out["status"] = "draft"
+    out.update({k: v for k, v in meta.items() if k not in out})
+    out["generated"] = {"by": _arg("--by", "claude-code/plan-mode"), "at": now}
+    email = _okf.git_user_email()
+    if email:
+        out["verified"] = [{"by": f"human:{email}", "at": now}]
+
+    dest = _okf.project_dir() / "docs" / "exec-plans" / "active" / f"{slug}.md"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(_okf.join(out, body))
+    except OSError as error:
+        print(f"[poise] could not write active plan: {error}")
+        return 0
+    try:
+        import check_okf
+        check_okf.write_indexes(only_existing=True)
+    except Exception:  # never fail the hook over an index refresh
+        pass
+    print(f"[poise] active plan: docs/exec-plans/active/{slug}.md")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

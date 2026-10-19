@@ -9,7 +9,8 @@ Read-only analysis. No code changes. Produce a drift report and stop.
 ## Steps
 
 0. **Deterministic baseline.** Run `python scripts/gc_static.py` first.
-   It covers fully-ticked plans, stale plans/quality rows, and broken
+   It covers fully-ticked plans, stale plans, concepts past `stale_after`, OKF
+   conformance (frontmatter, `type`, index.md drift), and broken
    intra-doc links. Treat its output as the baseline; the steps below
    add the judgment-required passes.
 
@@ -34,6 +35,11 @@ Read-only analysis. No code changes. Produce a drift report and stop.
 6. Check `docs/decisions/`:
    - Do ADRs reference modules/files that still exist?
 
+7. Knowledge freshness (docs/ is an OKF bundle — see `docs/index.md`):
+   - Does each file's frontmatter `description` still match its content?
+   - Which concepts are unverified (no `verified` entry) yet relied on?
+   - Which files changed meaningfully without a newer `generated.at`?
+
 ## Output
 
 ```
@@ -44,6 +50,7 @@ Read-only analysis. No code changes. Produce a drift report and stop.
 ### quality.md items that are stale
 ### Plans that appear complete
 ### Broken ADR references
+### Knowledge freshness
 ### Recommended actions (prioritised)
 ```
 

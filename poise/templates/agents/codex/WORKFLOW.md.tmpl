@@ -23,7 +23,9 @@ requires an architectural decision:
 
 - Create an execution plan at `docs/exec-plans/active/<slug>.md`
   **before editing any source files — do not start editing until it exists.**
-- Use the template at `docs/exec-plans/template.md`
+- Use the template at `docs/exec-plans/template.md`. Keep its OKF frontmatter
+  (`type: Exec Plan`, `status: draft`, …) and set
+  `generated: {by: codex/plan, at: <UTC ISO timestamp>}`
 - Record key decisions in the plan's decision log as work progresses
 
 Simple tasks (single file, one session): work directly, no plan needed.

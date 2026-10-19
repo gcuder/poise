@@ -7,7 +7,7 @@
 ## Read before you act
 
 Before editing, read the `docs/` file for the area you're touching (see **Start
-here**). For multi-step work (more than two files / modules), create an execution
+here**; `docs/index.md` lists every doc with a one-line description). For multi-step work (more than two files / modules), create an execution
 plan in `docs/exec-plans/active/` **before** editing and work from it. Your
 SessionStart brief surfaces the active plan and these rules every session; the
 plan gate (`scripts/require_plan.py`, on by default) enforces it.
@@ -18,6 +18,7 @@ plan gate (`scripts/require_plan.py`, on by default) enforces it.
 
 | Question                           | Read                                          |
 |------------------------------------|-----------------------------------------------|
+| What docs exist?                   | [docs/index.md](docs/index.md)                |
 | How is this repo structured?       | [docs/architecture.md](docs/architecture.md)  |
 | How do I run / test / deploy?      | [docs/workflows.md](docs/workflows.md)        |
 | What are the coding conventions?   | [docs/conventions.md](docs/conventions.md)    |
@@ -88,5 +89,8 @@ Code's plan mode, the `ExitPlanMode` hook writes it to
 `docs/exec-plans/active/<slug>.md`. When every checkbox in that plan is marked
 `- [x]`, the `Stop` hook moves it to `docs/exec-plans/completed/`. The
 `{{PLAN_CMD}}` command is a manual fallback for agents without plan mode.
+
+`docs/` is an OKF knowledge bundle: each doc starts with YAML frontmatter
+(`type`, `title`, `description`, `generated`). Keep it accurate; `make check-docs`.
 
 Completed plans: [docs/exec-plans/completed/](docs/exec-plans/completed/)

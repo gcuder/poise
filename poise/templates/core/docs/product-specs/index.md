@@ -10,4 +10,8 @@ Each spec answers:
 - What is explicitly out of scope?
 
 Agents read specs to understand intent before implementing. If there is
-no spec for the feature you're about to build, write one first.
+no spec for the feature you're about to build, write one first: copy
+`template.md`, fill in the frontmatter (`type: Product Spec`), and run
+`make docs-index`.
+
+<!-- okf:listing -->

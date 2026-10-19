@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""
+Archive fully checked plans for {{REPO_NAME}} without overwriting history.
+
+Shared by every agent adapter (Claude Code Stop hook, Pi agent_before_settle).
+A plan whose checkboxes are all `- [x]` moves from docs/exec-plans/active/ to
+docs/exec-plans/completed/, its OKF frontmatter gets `status: stable` and
+`completed_at`, and docs/exec-plans/log.md gets a newest-first entry.
+
+Legacy (pre-OKF) plans are given frontmatter on the way, so a half-migrated
+repo still archives correctly. Exits 0 always.
+
+Usage:
+    python scripts/archive_plans.py              # archive finished plans
+    python scripts/archive_plans.py --min-age 5  # skip files touched <5s ago
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import _okf  # noqa: E402
+import _plans  # noqa: E402
+
+
+def _min_age() -> float:
+    if "--min-age" in sys.argv:
+        try:
+            return float(sys.argv[sys.argv.index("--min-age") + 1])
+        except (IndexError, ValueError):
+            pass
+    return 0.0
+
+
+def completed_text(path: Path) -> str:
+    text = path.read_text(errors="ignore")
+    try:
+        meta, body = _okf.split(text)
+    except ValueError:
+        meta, body = None, text
+    if meta is None:
+        meta, body = _okf.from_legacy(text, f"exec-plans/completed/{path.name}")
+        meta["generated"] = {"by": "process:poise-archive", "at": _okf.now_iso()}
+    meta.setdefault("type", "Exec Plan")
+    meta["status"] = "stable"
+    meta["completed_at"] = _okf.now_iso()
+    return _okf.join(meta, body)
+
+
+def append_log(plans_dir: Path, title: str, name: str) -> None:
+    log = plans_dir / "log.md"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    entry = f"- **Completion**: [{title}](completed/{name})\n"
+    try:
+        lines = log.read_text().splitlines(keepends=True) if log.exists() \
+            else ["# Exec plan log\n", "\n"]
+    except OSError:
+        return
+    heading = f"## {today}\n"
+    first = next((i for i, l in enumerate(lines) if l.startswith("## ")), None)
+    if first is not None and lines[first] == heading:
+        lines.insert(first + 1, entry)
+    else:
+        at = first if first is not None else len(lines)
+        lines[at:at] = [heading, entry, "\n"]
+    try:
+        log.write_text("".join(lines))
+    except OSError:
+        pass
+
+
+def main() -> int:
+    os.environ["CLAUDE_PROJECT_DIR"] = str(ROOT)
+    plans_dir = ROOT / "docs/exec-plans"
+    completed = plans_dir / "completed"
+    min_age = _min_age()
+    archived = False
+    for path in _plans.iter_active_plans():
+        if path.is_symlink():
+            continue
+        try:
+            if time.time() - path.stat().st_mtime < min_age:
+                continue
+        except OSError:
+            continue
+        info = _plans.parse_plan(path)
+        # Empty plans and prose-only drafts must not be silently archived.
+        if not info["checked"] or info["unchecked"]:
+            continue
+        target = completed / path.name
+        try:
+            completed.mkdir(parents=True, exist_ok=True)
+            # Exclusive create: two processes cannot clobber history. The
+            # source is removed only after the archived copy is written.
+            with open(target, "x") as handle:
+                handle.write(completed_text(path))
+            path.unlink()
+            append_log(plans_dir, info["title"], path.name)
+            archived = True
+            print(f"POISE: archived completed plan to docs/exec-plans/completed/{path.name}")
+        except FileExistsError:
+            print(f"POISE: {target.name} already exists in completed/. "
+                  "REMEDIATION: choose a unique plan filename and archive manually; both plans were preserved.")
+        except OSError as error:
+            print(f"POISE: could not archive {path.name}: {error}. "
+                  "REMEDIATION: move the completed plan manually without overwriting history.")
+    if archived:
+        try:
+            import check_okf
+            check_okf.write_indexes(only_existing=True)
+        except Exception:  # never fail the hook over an index refresh
+            pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

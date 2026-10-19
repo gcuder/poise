@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""
+Migrate {{REPO_NAME}}'s docs/ from the pre-OKF poise format to an OKF v0.2
+bundle.
+
+Dry run by default: prints a unified diff and touches nothing. --apply writes.
+Idempotent: files that already have frontmatter with `type` are skipped, so a
+second --apply is a no-op.
+
+What it does:
+  - adds frontmatter to every concept (type inferred from its path, title from
+    the H1, description from the first prose line)
+  - moves leading **Status** / **Created** / **Completed** / **Affects** /
+    **Date** lines into frontmatter; the rest of the body is kept byte-for-byte
+  - renames README.md → index.md under exec-plans/, product-specs/,
+    references/ (git mv when tracked) and keeps their prose as the intro
+  - creates docs/index.md (okf_version) and docs/exec-plans/log.md
+  - regenerates index.md listings, then prints the conformance report
+
+Migrated content is marked `generated.by: process:poise-migrate` with no
+`verified` entry — it reads as unverified until a person reviews it.
+
+Usage:
+    python scripts/migrate_okf.py          # dry run
+    python scripts/migrate_okf.py --apply  # write changes
+"""
+from __future__ import annotations
+
+import difflib
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _okf  # noqa: E402
+import check_okf  # noqa: E402
+
+INDEX_DIRS = ("exec-plans", "product-specs", "references")
+
+
+def _rel(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(_okf.project_dir().resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _created_at(path: Path) -> str:
+    stamp = _okf.git_created_at(path)
+    if stamp:
+        return stamp
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def plan_concepts(docs: Path) -> tuple[list[tuple[Path, str, str]], list[str]]:
+    """[(path, old, new)] for concepts needing frontmatter, plus skip notes."""
+    changes: list[tuple[Path, str, str]] = []
+    notes: list[str] = []
+    for path in _okf.iter_concepts(docs):
+        if path.name == "README.md" and path.parent.name in INDEX_DIRS:
+            continue  # handled by plan_renames
+        old = path.read_text(errors="ignore")
+        try:
+            meta, _ = _okf.split(old)
+        except ValueError as error:
+            notes.append(f"SKIP: {_rel(path)} — unparseable frontmatter ({error}). "
+                         "REMEDIATION: fix the YAML by hand, then rerun.")
+            continue
+        if meta is not None:
+            if not str(meta.get("type", "")).strip():
+                notes.append(f"SKIP: {_rel(path)} — has frontmatter but no `type`. "
+                             "REMEDIATION: add `type:` by hand.")
+            continue
+        rel = path.relative_to(docs).as_posix()
+        if _okf.infer_type(rel) is None:
+            notes.append(f"UNCLASSIFIED: {_rel(path)} — no type for this path. "
+                         "REMEDIATION: add frontmatter with a `type:` that "
+                         "describes it, or move it under a known docs/ folder.")
+            continue
+        new_meta, body = _okf.from_legacy(old, rel)
+        if not new_meta["generated"]["at"]:
+            new_meta["generated"]["at"] = _created_at(path)
+        changes.append((path, old, _okf.join(new_meta, body)))
+    return changes, notes
+
+
+def plan_renames(docs: Path) -> tuple[list[tuple[Path, Path, str]], list[str]]:
+    """[(readme, index, new_text)] for README.md → index.md conversions."""
+    renames: list[tuple[Path, Path, str]] = []
+    notes: list[str] = []
+    for name in INDEX_DIRS:
+        readme, index = docs / name / "README.md", docs / name / "index.md"
+        if not readme.exists():
+            continue
+        if index.exists():
+            notes.append(f"SKIP: {_rel(readme)} — {_rel(index)} already exists. "
+                         "REMEDIATION: merge README.md into index.md above the "
+                         f"'{_okf.LISTING_MARKER}' line and delete README.md.")
+            continue
+        text = readme.read_text(errors="ignore").rstrip() + "\n\n"
+        renames.append((readme, index, text + _okf.LISTING_MARKER + "\n"))
+    return renames, notes
+
+
+def completed_log(docs: Path) -> str | None:
+    log = docs / "exec-plans" / "log.md"
+    completed = docs / "exec-plans" / "completed"
+    if log.exists() or not completed.exists():
+        return None
+    by_date: dict[str, list[str]] = {}
+    for path in sorted(completed.glob("*.md")):
+        text = path.read_text(errors="ignore")
+        meta, body = _okf.from_legacy(text, f"exec-plans/completed/{path.name}")
+        try:
+            existing, _ = _okf.split(text)
+        except ValueError:
+            existing = None
+        meta = existing or meta
+        stamp = str(meta.get("completed_at") or meta.get("generated", {}).get("at") or "")
+        day = stamp[:10] if stamp else "undated"
+        title = meta.get("title") or path.stem
+        by_date.setdefault(day, []).append(f"- **Completion**: [{title}](completed/{path.name})")
+    if not by_date:
+        return None
+    out = ["# Exec plan log", ""]
+    for day in sorted((d for d in by_date if d != "undated"), reverse=True):
+        out += [f"## {day}", *by_date[day], ""]
+    if "undated" in by_date:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        out += [f"## {today}", "- **Creation**: log started by migration; these plans had no completion date:",
+                *by_date["undated"], ""]
+    return "\n".join(out)
+
+
+def _diff(path: Path, old: str, new: str, new_path: Path | None = None) -> str:
+    return "".join(difflib.unified_diff(
+        old.splitlines(keepends=True), new.splitlines(keepends=True),
+        fromfile=f"a/{_rel(path)}", tofile=f"b/{_rel(new_path or path)}"))
+
+
+def _git_mv(src: Path, dst: Path) -> None:
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", str(src)],
+                             cwd=_okf.project_dir(), capture_output=True).returncode == 0
+    if tracked and subprocess.run(["git", "mv", str(src), str(dst)],
+                                  cwd=_okf.project_dir(), capture_output=True).returncode == 0:
+        return
+    src.rename(dst)
+
+
+def main() -> int:
+    apply = "--apply" in sys.argv
+    docs = _okf.docs_dir()
+    if not docs.exists():
+        print("migrate_okf: no docs/ directory — nothing to migrate.")
+        return 0
+
+    changes, notes = plan_concepts(docs)
+    renames, rename_notes = plan_renames(docs)
+    notes += rename_notes
+    log_text = completed_log(docs)
+    root_index = docs / "index.md"
+
+    for path, old, new in changes:
+        print(_diff(path, old, new), end="")
+    for readme, index, text in renames:
+        print(_diff(readme, readme.read_text(errors="ignore"), text, index), end="")
+    if log_text:
+        print(f"+++ new file docs/exec-plans/log.md ({log_text.count('**Completion**')} entries)")
+    if not root_index.exists():
+        print("+++ new file docs/index.md (okf_version 0.2)")
+    for note in notes:
+        print(note)
+
+    pending = bool(changes or renames or log_text or not root_index.exists())
+    if not apply:
+        if pending:
+            print("\nDry run — nothing written. Rerun with --apply "
+                  "(`make migrate-docs APPLY=1`) to migrate.")
+        else:
+            print("migrate_okf: docs/ is already in OKF format.")
+        return 0
+
+    for path, _, new in changes:
+        path.write_text(new)
+    for readme, index, text in renames:
+        _git_mv(readme, index)
+        index.write_text(text)
+    if log_text:
+        (docs / "exec-plans" / "log.md").write_text(log_text)
+    for path in check_okf.write_indexes(docs):
+        print(f"wrote {_rel(path)}")
+    print(f"\nMigrated {len(changes)} concept(s), {len(renames)} index file(s).\n")
+    findings = check_okf.conformance_findings(docs) + check_okf.index_findings(docs)
+    for finding in findings:
+        print(finding)
+    if not findings:
+        print("OKF: docs/ bundle is conformant.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
