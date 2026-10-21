@@ -10,6 +10,9 @@ without it having to choose to open AGENTS.md.
 - Rules are extracted from AGENTS.md at runtime (single source of truth — no
   generation-time duplication, so the brief cannot drift from AGENTS.md).
 - Active plans are read live from docs/exec-plans/active/ via _plans.py.
+- Findings from the newest doc-gardening report (docs/.gc-report-*.md, written
+  by the post-merge hook and `make gc`) are listed so the sweep's output
+  actually reaches an agent instead of sitting in a gitignored file.
 
 Reads the session JSON envelope on stdin (tolerant of empty stdin). On
 `resume` / `compact` sources the full brief is already earlier in the
@@ -30,6 +33,9 @@ import _plans  # noqa: E402
 
 # AGENTS.md H2 sections surfaced verbatim in the brief.
 SECTIONS = ("Read before you act", "Non-negotiable rules")
+
+# Findings surfaced from the newest gc report; the rest stay in the file.
+MAX_GC_FINDINGS = 8
 
 
 def read_source() -> str:
@@ -84,6 +90,31 @@ def rules_block() -> str | None:
     return "\n\n".join(chunks) or None
 
 
+def gc_block() -> str | None:
+    """Findings from the newest docs/.gc-report-*.md, or None if it is clean."""
+    reports = sorted((_plans.project_dir() / "docs").glob(".gc-report-*.md"))
+    if not reports:
+        return None
+    newest = reports[-1]
+    try:
+        text = newest.read_text(errors="ignore")
+    except OSError:
+        return None
+    findings = [
+        line for line in text.splitlines()
+        if line.startswith("- ") and line != "- (none)"
+    ]
+    if not findings:
+        return None
+    rel = newest.relative_to(_plans.project_dir())
+    lines = [f"Doc-gardening findings ({len(findings)}, from {rel}) — fix or "
+             "acknowledge before unrelated work:"]
+    lines.extend(findings[:MAX_GC_FINDINGS])
+    if len(findings) > MAX_GC_FINDINGS:
+        lines.append(f"- … {len(findings) - MAX_GC_FINDINGS} more in {rel}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     if os.environ.get("POISE_BRIEF") == "0":
         return 0
@@ -111,6 +142,12 @@ def main() -> int:
             "No active execution plan. For multi-step work (more than two files / "
             "modules), create one in docs/exec-plans/active/ BEFORE editing."
         )
+
+    if source not in ("resume", "compact"):
+        gc = gc_block()
+        if gc:
+            lines.append("")
+            lines.append(gc)
 
     print("\n".join(lines))
     return 0

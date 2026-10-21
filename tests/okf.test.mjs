@@ -8,7 +8,7 @@ import { repo, render } from './fixtures.mjs';
 
 // Real Python scripts against rendered templates in a throwaway git repo.
 const core = join(repo, 'poise/templates/core');
-const SCRIPTS = ['_okf.py', '_plans.py', 'check_okf.py', 'archive_plans.py', 'capture_plan.py', 'migrate_okf.py', 'gc_static.py'];
+const SCRIPTS = ['_okf.py', '_plans.py', 'check_okf.py', 'archive_plans.py', 'capture_plan.py', 'migrate_okf.py', 'gc_static.py', 'session_brief.py'];
 
 async function loose(source, values = {}) {
   const text = await readFile(source, 'utf8');
@@ -204,6 +204,21 @@ test('index listings skip dotfiles such as gitignored gc reports', async (t) => 
   assert.doesNotMatch(await w.read('docs/index.md'), /gc-report/);
   const after = w.py(['scripts/check_okf.py', '--fail-on-any']);
   assert.equal(after.status, 0, after.stdout);
+});
+
+test('session brief lists findings from the newest gc report only', async (t) => {
+  const w = await workspace(t);
+  await w.put('docs/.gc-report-20261001.md', '## OKF conformance\n- OLD_FINDING: docs/a.md\n');
+  await w.put('docs/.gc-report-20261021.md', '## Stale plans (mtime)\n- (none)\n\n## OKF conformance\n- OKF_INDEX_STALE: docs/exec-plans/index.md\n\nTotal findings: 1\n');
+  const startup = w.py(['scripts/session_brief.py'], {});
+  assert.equal(startup.status, 0, startup.stderr);
+  assert.match(startup.stdout, /Doc-gardening findings \(1, from docs\/.gc-report-20261021.md\)/);
+  assert.match(startup.stdout, /- OKF_INDEX_STALE: docs\/exec-plans\/index.md/);
+  assert.doesNotMatch(startup.stdout, /OLD_FINDING|\(none\)/);
+
+  await w.put('docs/.gc-report-20261022.md', '## OKF conformance\n- (none)\n\nTotal findings: 0\n');
+  const clean = w.py(['scripts/session_brief.py']);
+  assert.doesNotMatch(clean.stdout, /Doc-gardening/);
 });
 
 async function legacyTree(w) {

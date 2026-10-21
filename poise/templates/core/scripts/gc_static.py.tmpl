@@ -22,7 +22,7 @@ Usage:
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -106,7 +106,7 @@ def main() -> int:
     ]
 
     total = sum(len(findings) for _, findings in sections)
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     print(f"# gc_static report — {timestamp}\n")
     for title, findings in sections:

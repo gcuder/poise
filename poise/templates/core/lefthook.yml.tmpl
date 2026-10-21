@@ -71,8 +71,8 @@ pre-push:
 
 # Post-merge: deterministic doc-gardening sweep.
 # Read-only — exits 0 always so it never blocks merges. The report is
-# tee'd to docs/.gc-report-YYYYMMDD.md (gitignored) so the next agent
-# session can pick it up without re-running the sweep.
+# tee'd to docs/.gc-report-YYYYMMDD.md (gitignored); scripts/session_brief.py
+# lists the newest report's findings at the start of the next agent session.
 post-merge:
   commands:
     gc-static:
