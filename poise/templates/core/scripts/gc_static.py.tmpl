@@ -37,6 +37,9 @@ PLANS_ACTIVE = DOCS / "exec-plans" / "active"
 CHECKBOX_OPEN = re.compile(r"^\s*-\s*\[\s\]", re.MULTILINE)
 CHECKBOX_DONE = re.compile(r"^\s*-\s*\[x\]", re.MULTILINE | re.IGNORECASE)
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)#]+)\)")
+# Code is not prose: `x[i](y)` in a sample must not read as a link.
+FENCED_CODE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[`~]*[ \t]*$", re.MULTILINE | re.DOTALL)
+INLINE_CODE = re.compile(r"(`+)[^`\n].*?\1")
 
 
 def _age_days(path: Path) -> int:
@@ -79,7 +82,9 @@ def check_broken_links() -> list[str]:
         return []
     findings: list[str] = []
     for md in check_okf._okf.iter_markdown(DOCS):
-        for match in MD_LINK.finditer(md.read_text(errors="ignore")):
+        text = md.read_text(errors="ignore")
+        text = INLINE_CODE.sub("", FENCED_CODE.sub("", text))
+        for match in MD_LINK.finditer(text):
             target = match.group(1).strip()
             if target.startswith(("http://", "https://", "mailto:")):
                 continue
