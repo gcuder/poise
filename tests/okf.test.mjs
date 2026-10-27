@@ -184,6 +184,18 @@ test('gc sweep reports expired stale_after and resolves bundle-absolute links', 
   assert.doesNotMatch(result.stdout, /→ \/architecture.md/);
 });
 
+test('gc sweep ignores link-shaped text inside code', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('docs/references/code.md', '---\ntype: Reference\ntitle: Code\n---\n\n# Code\n\n```python\nreturn BUILDERS[body.name](body)\n```\n\nInline `f[x](y)` too. [gone](missing.md)\n');
+  w.py(['scripts/check_okf.py', '--write-index']);
+  const result = w.py(['scripts/gc_static.py']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /BROKEN_LINK: docs\/references\/code.md → missing.md/);
+  assert.doesNotMatch(result.stdout, /→ body/);
+  assert.doesNotMatch(result.stdout, /→ y/);
+});
+
 test('index regeneration keeps the hand-written intro above the listing marker', async (t) => {
   const w = await workspace(t);
   await freshBundle(w);
