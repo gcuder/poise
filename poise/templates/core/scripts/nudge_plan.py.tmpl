@@ -11,6 +11,9 @@ envelope on stdin (shape varies per agent; we look for `prompt` /
   2. Else, if the prompt looks multi-step, direct the agent to create a plan
      BEFORE editing.
 
+In plan mode (Claude Code sends `permission_mode: "plan"`) it first names the
+sections of docs/exec-plans/template.md, so plan-mode plans take that shape.
+
 The message is agent-directed and imperative (no "shift-tab", no "consider")
 because nudges worded as optional get ignored. Adapters forward stdout into
 the agent's context. This is a NUDGE, not a gate — exit code is always 0;
@@ -44,6 +47,14 @@ CROSS_CUTTING = re.compile(
     re.IGNORECASE,
 )
 FILE_REF = re.compile(r"[A-Za-z0-9_./-]+\.(py|ts|tsx|go|rs|java|kt|rb|md|yml|yaml|toml|json)\b")
+
+SHAPE = (
+    "Write the plan with these sections from docs/exec-plans/template.md: "
+    + ", ".join(_plans.PLAN_SECTIONS) + ". Decide before you code: every row in "
+    "Decisions names the option turned down, Open questions is empty or each "
+    "item is marked `assumed: …`, and each `- [ ]` step has `files:` and "
+    "`done when:` sub-bullets."
+)
 
 MULTI_FILE_HINT = 3
 LONG_PROMPT_CHARS = 600
@@ -85,6 +96,10 @@ def main() -> int:
             payload = {"prompt": raw}
     prompt = extract_prompt(payload) if payload else ""
 
+    planning = payload.get("permission_mode") == "plan"
+    if planning:
+        print("POISE: you are planning. " + SHAPE)
+
     # 1. Re-surface an active plan so the agent keeps following it (every turn).
     active = _plans.summarize_active()
     if active:
@@ -92,16 +107,16 @@ def main() -> int:
         return 0
 
     # 2. No active plan: if the task looks multi-step, direct the agent to make one.
-    if looks_multi_step(prompt):
+    if not planning and looks_multi_step(prompt):
         print(
             "POISE: this task looks multi-step. Before editing any files, produce "
             "an execution plan and save it to docs/exec-plans/active/<slug>.md "
-            "(enter plan mode / use your plan tool, or run /plan). Do not start "
-            "editing until the plan exists; then work from it, checking off "
-            "`- [ ]` steps as you go. Disable this nudge with POISE_NUDGE_PLAN=0."
+            "(enter plan mode / use your plan tool, or run /plan). " + SHAPE + " "
+            "Do not start editing until the plan exists; then work from it, "
+            "checking off `- [ ]` steps as you go. Disable this nudge with "
+            "POISE_NUDGE_PLAN=0."
         )
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

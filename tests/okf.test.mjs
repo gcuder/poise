@@ -8,7 +8,7 @@ import { repo, render } from './fixtures.mjs';
 
 // Real Python scripts against rendered templates in a throwaway git repo.
 const core = join(repo, 'poise/templates/core');
-const SCRIPTS = ['_okf.py', '_plans.py', 'check_okf.py', 'archive_plans.py', 'capture_plan.py', 'migrate_okf.py', 'gc_static.py', 'session_brief.py'];
+const SCRIPTS = ['_okf.py', '_plans.py', 'check_okf.py', 'archive_plans.py', 'capture_plan.py', 'migrate_okf.py', 'gc_static.py', 'session_brief.py', 'nudge_plan.py'];
 
 async function loose(source, values = {}) {
   const text = await readFile(source, 'utf8');
@@ -31,8 +31,8 @@ async function workspace(t) {
   git('init', '-q');
   git('config', 'user.email', 'dev@example.com');
   git('config', 'user.name', 'Dev');
-  const py = (args, env = {}) => spawnSync('python3', args, {
-    cwd: root, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
+  const py = (args, env = {}, input = '') => spawnSync('python3', args, {
+    cwd: root, encoding: 'utf8', input, env: { ...process.env, CLAUDE_PROJECT_DIR: root, ...env },
   });
   const read = (path) => readFile(join(root, path), 'utf8');
   const okf = (code) => {
@@ -137,6 +137,8 @@ test('approved plan is captured as a human-verified draft exec plan', async (t) 
   const result = w.py(['scripts/capture_plan.py', '--source', 'plan-src.md', '--by', 'claude-code/plan-mode']);
   assert.match(result.stdout, /active plan: docs\/exec-plans\/active\/ship-the-widget-api.md/);
   assert.match(result.stdout, /add `tags: \[\.\.\.\]` to its frontmatter/);
+  assert.match(result.stdout, /plan is missing: Summary, Approach, Decisions, Verification\./);
+  assert.doesNotMatch(result.stdout, /open question/);
   const plan = await w.read('docs/exec-plans/active/ship-the-widget-api.md');
   assert.match(plan, /^---\ntype: Exec Plan\ntitle: Ship the Widget API\ndescription: Customers need widgets.\nstatus: draft\n/);
   assert.match(plan, /generated:\n  by: claude-code\/plan-mode\n  at: \d{4}-\d{2}-\d{2}T/);
@@ -145,6 +147,33 @@ test('approved plan is captured as a human-verified draft exec plan', async (t) 
   assert.match(await w.read('docs/exec-plans/index.md'), /## active\n- \[Ship the Widget API\]\(active\/ship-the-widget-api.md\)/);
   const brief = w.py(['-c', 'import sys; sys.path.insert(0, "scripts"); import _plans; print(_plans.brief_active())']);
   assert.match(brief.stdout, /- Ship the Widget API \(docs\/exec-plans\/active\/ship-the-widget-api.md\) — 0\/1 done/);
+});
+
+test('a decision-first plan passes the section check and counts only top-level steps', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('plan-src.md', [
+    '# Add search', '', '## Summary', '', 'Users can search posts.', '',
+    '## Approach', '', 'Postgres full-text index.', '',
+    '## Decisions', '', '| Question | Choice | Why | Rejected |', '|---|---|---|---|', '| Engine | Postgres | in stack | Elastic: new service |', '',
+    '## Open questions', '', '<!-- resolve before approval -->', '- assumed: English only', '- Paginate results?', '',
+    '## Steps', '', '- [x] Add index', '  - files: `db/schema.sql`', '  - done when: migration runs',
+    '- [ ] Add endpoint', '  - files: `api/search.py`', '  - done when: `make test` passes', '',
+    '## Verification plan', '', '- `make test`', '',
+  ].join('\n'));
+  const result = w.py(['scripts/capture_plan.py', '--source', 'plan-src.md']);
+  assert.doesNotMatch(result.stdout, /plan is missing/);
+  assert.match(result.stdout, /1 open question\(s\) unresolved/);
+  const brief = w.py(['-c', 'import sys; sys.path.insert(0, "scripts"); import _plans; print(_plans.brief_active())']);
+  assert.match(brief.stdout, /— 1\/2 done\n    \[ \] Add endpoint\n?$/);
+});
+
+test('plan mode gets the template shape; other prompts stay quiet', async (t) => {
+  const w = await workspace(t);
+  const planning = w.py(['scripts/nudge_plan.py'], {}, JSON.stringify({ permission_mode: 'plan', prompt: 'fix the typo' }));
+  assert.match(planning.stdout, /POISE: you are planning\. Write the plan with these sections from docs\/exec-plans\/template\.md: Summary, Context, Scope, Approach, Decisions, Open questions, Changes, Steps, Risks, Verification, Decision log\./);
+  const normal = w.py(['scripts/nudge_plan.py'], {}, JSON.stringify({ permission_mode: 'default', prompt: 'fix the typo' }));
+  assert.equal(normal.stdout, '');
 });
 
 test('finished plans are archived as stable with a log entry; legacy plans gain frontmatter', async (t) => {

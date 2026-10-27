@@ -33,6 +33,18 @@ in plan mode also carry `verified` by the approving human.
 make plan name=<slug>
 ```
 
+## What a plan contains
+
+Every plan follows `template.md`, so it reads the same for humans and agents:
+Summary, Context, Scope, Approach, Decisions, Open questions, Changes, Steps,
+Risks, Verification, and a Decision log. The design choices are made in the
+plan, before any code: each row in Decisions names the option that was turned
+down, and Open questions is empty (or each item marked `assumed: …`) before
+the plan is approved.
+
+Steps are short top-level `- [ ]` lines with indented `files:` and
+`done when:` sub-bullets. Only the top-level checkboxes count towards progress.
+
 ## Completing a plan
 
 Tick every `- [ ]` step. The agent hook (`scripts/archive_plans.py`) then

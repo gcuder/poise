@@ -18,46 +18,17 @@ modules, requires an architectural decision, or introduces a new dependency.
 2. Read `docs/architecture.md` — which layers are affected?
 3. Read `docs/quality.md` — is there relevant existing debt?
 4. Read `docs/decisions/` for any ADR that touches this area.
-5. Create `docs/exec-plans/active/<slug>.md`:
+5. Copy `docs/exec-plans/template.md` to `docs/exec-plans/active/<slug>.md`
+   and fill every section: Summary, Context, Scope, Approach, Decisions,
+   Open questions, Changes, Steps, Risks, Verification, Decision log.
+   Set the frontmatter `generated` to
+   `{by: claude-code/plan-command, at: <UTC timestamp, e.g. 2026-01-31T14:05:00Z>}`.
 
-```markdown
----
-type: Exec Plan
-title: <Title>
-description: <one line — what done looks like>
-tags: [<tag>, <tag>]
-status: draft
-affects: [<module>, <module>]
-generated:
-  by: claude-code/plan-command
-  at: <UTC timestamp, e.g. 2026-01-31T14:05:00Z>
----
-
-# <Title>
-
-## Goal
-One paragraph. What done looks like. Be concrete.
-
-## Context
-Why this is needed. Link to product spec, ADR, or quality.md item.
-
-## Out of scope
-What this plan does NOT cover.
-
-## Steps
-- [ ] Step 1 — <description>
-- [ ] Step 2 — <description>
-
-## Decision log
-| Date | Decision | Rationale |
-|------|----------|-----------|
-
-## Known risks
-Risks and mitigations.
-
-## Definition of done
-Concrete, checkable criteria. Tests that must pass. Docs to update.
-```
+   Decide before you code. Each row in Decisions names the option you turned
+   down. Answer every open question, or mark it `assumed: …`; the Open
+   questions section must be empty of unresolved items before you ask for
+   approval. Each `- [ ]` step is one short line with indented `files:` and
+   `done when:` sub-bullets.
 
    Choose `tags` from what this plan touches (modules, domain, technologies).
    Reuse tags already used in `docs/` for the same thing.
