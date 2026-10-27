@@ -18,11 +18,13 @@ Usage:
     python scripts/check_okf.py                # report, exit 0
     python scripts/check_okf.py --fail-on-any  # exit 1 if anything flagged
     python scripts/check_okf.py --write-index  # regenerate index.md listings first
+    python scripts/check_okf.py --stage        # pre-commit: refresh listings, git add them
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -240,7 +242,26 @@ def write_indexes(docs: Path | None = None, only_existing: bool = False) -> list
     return written
 
 
+def stage_indexes(docs: Path | None = None) -> None:
+    """Pre-commit: refresh generated listings and stage every index.md that
+    carries the marker. Hooks rewrite listings outside the agent's commit
+    (plan capture, Stop-time archiving), so the index is staged here instead
+    of relying on the agent to remember it. Never fails the commit."""
+    docs = docs or _okf.docs_dir()
+    if not docs.exists():
+        return
+    write_indexes(docs, only_existing=True)
+    indexes = [str(d / "index.md") for d in _index_dirs(docs)
+               if (d / "index.md").exists()
+               and _okf.LISTING_MARKER in (d / "index.md").read_text(errors="ignore")]
+    if indexes:
+        subprocess.run(["git", "add", "--", *indexes], cwd=docs.parent, check=False)
+
+
 def main() -> int:
+    if "--stage" in sys.argv:
+        stage_indexes()
+        return 0
     if "--write-index" in sys.argv:
         for path in write_indexes():
             print(f"wrote {_rel(path)}")
