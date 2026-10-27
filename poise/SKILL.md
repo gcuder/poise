@@ -276,7 +276,9 @@ hooks delegate to. Advisory only — exit 0 always.
 
 `nudge_plan.py` does two jobs every turn: it re-surfaces any active plan (so
 the agent keeps following it) and, when there is none and the prompt looks
-multi-step, prints an imperative directive to create one before editing. It
+multi-step, prints an imperative directive to create one before editing. In
+Claude Code plan mode (`permission_mode: "plan"`) it also lists the sections of
+`docs/exec-plans/template.md`, so plan-mode plans take the template's shape. It
 imports `scripts/_plans.py`.
 
 #### scripts/_okf.py, scripts/check_okf.py, scripts/archive_plans.py, scripts/capture_plan.py, scripts/migrate_okf.py
@@ -296,8 +298,9 @@ Copy as-is — agent-agnostic, standard library only. Only `{{REPO_NAME}}` to fi
   `status: stable` + `completed_at`, appends to `docs/exec-plans/log.md`.
   Never overwrites history. Called by the Claude Code Stop hook and Pi.
 - `capture_plan.py` — saves an approved plan-mode plan as an OKF exec plan
-  (`status: draft`, `verified` by `human:<git user.email>`). Called by the
-  Claude Code ExitPlanMode hook.
+  (`status: draft`, `verified` by `human:<git user.email>`), then names any
+  missing required section and any unresolved open question (advisory).
+  Called by the Claude Code ExitPlanMode hook.
 - `migrate_okf.py` — upgrades pre-OKF poise docs in place (`make migrate-docs`,
   dry run unless `APPLY=1`). Used by Phase U.
 
@@ -310,7 +313,9 @@ Copy as-is — agent-agnostic. Only `{{REPO_NAME}}` to fill.
 
 - `_plans.py` — shared active-plan parser. Single source of truth for reading
   `docs/exec-plans/active/` and the `- [ ]` / `- [x]` convention; reads the
-  plan title from OKF frontmatter. Imported by the scripts below and by
+  plan title from OKF frontmatter. Also holds the plan shape
+  (`PLAN_SECTIONS`, `REQUIRED_SECTIONS`) and the `missing_sections` /
+  `open_questions` checks. Imported by the scripts below and by
   `archive_plans.py`.
 - `session_brief.py` — the **SessionStart brief**. Extracts the `Read before
   you act` + `Non-negotiable rules` sections from `AGENTS.md` at runtime and

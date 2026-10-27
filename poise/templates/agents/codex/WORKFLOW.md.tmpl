@@ -27,7 +27,11 @@ requires an architectural decision:
   (`type: Exec Plan`, `status: draft`, …), choose `tags` for this plan
   (reuse tags already in docs/), and set
   `generated: {by: codex/plan, at: <UTC ISO timestamp>}`
-- Record key decisions in the plan's decision log as work progresses
+- Fill every section. Decide before you code: each row in Decisions names the
+  option turned down, and every open question is answered or marked
+  `assumed: …`. Each `- [ ]` step has indented `files:` and `done when:`
+  sub-bullets.
+- Record decisions made after approval in the plan's decision log
 
 Simple tasks (single file, one session): work directly, no plan needed.
 

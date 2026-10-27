@@ -14,9 +14,12 @@ Create docs/exec-plans/active/<unique-slug>.md from docs/exec-plans/template.md 
   `status: draft`, `affects` (module list), `tags` (chosen for this plan,
   reusing tags already in docs/), and
   `generated: {by: pi/plan-prompt, at: <UTC ISO timestamp>}`
-- Goal, context (links to spec/ADR/debt), and out-of-scope work
-- Steps as `- [ ]` checkboxes, one concrete action per step
-- Decision log, known risks, and a testable definition of done
+- Every template section filled: Summary, Context, Scope, Approach,
+  Decisions, Open questions, Changes, Steps, Risks, Verification, Decision log
+- Decisions made now: each row names the option turned down
+- Open questions answered, or each marked `assumed: …`
+- Steps as short `- [ ]` checkboxes, each with indented `files:` and
+  `done when:` sub-bullets
 
 A plan is required before editing more than two source files. Docs are exempt.
 Summarise the approach and wait for explicit user approval before implementing.

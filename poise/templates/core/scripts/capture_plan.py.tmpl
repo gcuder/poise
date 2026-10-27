@@ -10,7 +10,8 @@ newest one into docs/exec-plans/active/<slug>.md with OKF frontmatter.
 The slug comes from the plan's title so a refined plan overwrites the same
 active file. Approval in plan mode is a human confirmation, so the plan is
 recorded as `verified` by `human:<git user.email>` when that is known.
-Exits 0 always.
+It then names any required section (see _plans.REQUIRED_SECTIONS) that is
+missing and any open question left unresolved — advisory only. Exits 0 always.
 
 Usage:
     python scripts/capture_plan.py                     # newest ~/.claude/plans/*.md
@@ -25,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _okf  # noqa: E402
+import _plans  # noqa: E402
 
 PLANS_DIR = Path.home() / ".claude" / "plans"
 MAX_AGE_SECONDS = 3600  # approval can take minutes; skip plans from old sessions
@@ -93,6 +95,14 @@ def main() -> int:
     except Exception:  # never fail the hook over an index refresh
         pass
     print(f"[poise] active plan: docs/exec-plans/active/{slug}.md")
+    missing = _plans.missing_sections(body)
+    if missing:
+        print(f"[poise] plan is missing: {', '.join(missing)}. Fill them in from "
+              "docs/exec-plans/template.md before you start editing.")
+    unresolved = _plans.open_questions(body)
+    if unresolved:
+        print(f"[poise] {len(unresolved)} open question(s) unresolved — answer each "
+              "or mark it `assumed: …` before you start editing.")
     if not out.get("tags"):
         print("[poise] add `tags: [...]` to its frontmatter — pick them from what the "
               "plan touches and reuse tags already used in docs/.")

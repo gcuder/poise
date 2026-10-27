@@ -9,7 +9,9 @@ identically.
 
 Plans are OKF concepts (`type: Exec Plan`): the title comes from frontmatter
 `title`, falling back to the first H1. archive_plans.py reuses parse_plan, so
-the checkbox convention lives only here.
+the checkbox convention lives only here. The plan shape (REQUIRED_SECTIONS,
+mirroring docs/exec-plans/template.md) lives here too, so capture_plan.py and
+nudge_plan.py name the same sections.
 
 Never raises into a hook — all file access is best-effort and returns
 empty results on error.
@@ -28,6 +30,14 @@ import _okf  # noqa: E402
 UNCHECKED_RE = re.compile(r"^- \[ \]\s*(.*)$")
 CHECKED_RE = re.compile(r"^- \[[xX]\]\s*(.*)$")
 TITLE_RE = re.compile(r"^#\s+(.*)$")
+SECTION_RE = re.compile(r"^##\s+(.*?)\s*$")
+COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# Sections every plan must have; the full shape is docs/exec-plans/template.md.
+PLAN_SECTIONS = ["Summary", "Context", "Scope", "Approach", "Decisions",
+                 "Open questions", "Changes", "Steps", "Risks", "Verification",
+                 "Decision log"]
+REQUIRED_SECTIONS = ["Summary", "Approach", "Decisions", "Steps", "Verification"]
 
 
 def project_dir() -> Path:
@@ -90,6 +100,45 @@ def parse_plan(path: Path) -> dict:
         "total": checked + len(unchecked_steps),
         "next_steps": unchecked_steps,
     }
+
+
+def sections(body: str) -> dict[str, str]:
+    """H2 heading (lower-cased) -> its text, with HTML comments removed."""
+    out: dict[str, str] = {}
+    current: str | None = None
+    for line in COMMENT_RE.sub("", body).splitlines():
+        m = SECTION_RE.match(line)
+        if m:
+            current = m.group(1).lower()
+            out[current] = ""
+        elif current is not None:
+            out[current] += line + "\n"
+    return out
+
+
+def missing_sections(body: str) -> list[str]:
+    """REQUIRED_SECTIONS absent or empty in the plan body (heading prefix match)."""
+    found = sections(body)
+    missing = []
+    for name in REQUIRED_SECTIONS:
+        texts = [t for h, t in found.items() if h.startswith(name.lower())]
+        if not any(t.strip() for t in texts):
+            missing.append(name)
+    return missing
+
+
+def open_questions(body: str) -> list[str]:
+    """Unresolved items under `## Open questions` (not `none`, not `assumed: …`)."""
+    text = sections(body).get("open questions", "")
+    items = []
+    for line in text.splitlines():
+        item = re.sub(r"^\s*(?:[-*]|\d+\.)\s+", "", line).strip()
+        if not item or item.lower().rstrip(".") == "none":
+            continue
+        if item.lower().startswith("assumed:"):
+            continue
+        items.append(item)
+    return items
 
 
 def _rel(path: Path) -> str:
