@@ -289,6 +289,9 @@ Copy as-is — agent-agnostic, standard library only. Only `{{REPO_NAME}}` to fi
 - `check_okf.py` — advisory conformance check (`make check-docs`); exit 0
   unless `--fail-on-any`. `--write-index` regenerates every `index.md`
   listing below its `<!-- okf:listing -->` marker (`make docs-index`).
+  `--stage` refreshes the listings and `git add`s them; the lefthook
+  `docs-index` pre-commit command runs it so index changes made by hooks are
+  never left unstaged.
 - `archive_plans.py` — moves fully ticked plans to `completed/`, sets
   `status: stable` + `completed_at`, appends to `docs/exec-plans/log.md`.
   Never overwrites history. Called by the Claude Code Stop hook and Pi.
@@ -331,6 +334,8 @@ Use: `templates/core/lefthook.yml.tmpl`
 Adapt format/lint commands to `LANGUAGE`. The `plan-gate` pre-commit command
 (`python3 scripts/require_plan.py --staged`) is the agent-agnostic backstop for
 the plan gate — keep it (it covers agents without an edit-time hook, e.g. Codex).
+Keep the `docs-index` pre-commit command too: hooks rewrite `index.md` listings
+outside the agent's commit, and this stages them on the next commit.
 
 #### docs/index.md
 Use: `templates/core/docs/index.md.tmpl`. The bundle root; carries
@@ -621,7 +626,8 @@ and the docs are migrated to OKF.
    templates no longer ship: `.pi/hooks/archive_plans.py`.
 4. **Makefile.** Add the `check-docs`, `docs-index` and `migrate-docs` targets,
    update the `plan` target, and change `make gc` to write
-   `docs/.gc-report-*.md`. Keep every other existing target.
+   `docs/.gc-report-*.md`. Keep every other existing target. In
+   `lefthook.yml`, add the `docs-index` pre-commit command from the template.
 5. **AGENTS.md.** Add the `docs/index.md` row to **Start here** and the OKF
    note under **Plans**. Keep it under 100 lines.
 6. **Migrate docs.** Run `make migrate-docs` (dry run) and show the user the

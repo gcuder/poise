@@ -208,6 +208,23 @@ test('index regeneration keeps the hand-written intro above the listing marker',
   assert.doesNotMatch(index, /stale listing/);
 });
 
+test('pre-commit staging picks up index listings that hooks rewrote after the last commit', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  w.py(['scripts/check_okf.py', '--write-index']);
+  w.git('add', '-A');
+  w.git('commit', '-qm', 'docs');
+  // A plan appears outside the agent's commit (e.g. archived by the Stop hook).
+  await w.put('docs/exec-plans/completed/done.md', '---\ntype: Exec Plan\ntitle: Done\ndescription: Finished.\nstatus: stable\n---\n\n# Done\n');
+  w.git('add', 'docs/exec-plans/completed/done.md');
+  const result = w.py(['scripts/check_okf.py', '--stage']);
+  assert.equal(result.status, 0, result.stderr);
+  const staged = w.git('diff', '--cached', '--name-only').stdout;
+  assert.match(staged, /docs\/exec-plans\/index.md/);
+  assert.equal(w.git('diff', '--name-only').stdout, '');
+  assert.match(await w.read('docs/exec-plans/index.md'), /- \[Done\]\(completed\/done.md\) — Finished./);
+});
+
 test('index listings skip dotfiles such as gitignored gc reports', async (t) => {
   const w = await workspace(t);
   await freshBundle(w);

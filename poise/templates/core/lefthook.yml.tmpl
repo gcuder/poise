@@ -6,6 +6,12 @@
 pre-commit:
   parallel: true
   commands:
+    # Hooks regenerate docs/**/index.md listings outside the agent's commit
+    # (plan capture, plan archiving on Stop). Refresh and stage them on every
+    # commit so a listing change never lingers as an unstaged edit.
+    docs-index:
+      run: python3 scripts/check_okf.py --stage
+
     format:
       glob: "{{SOURCE_GLOB}}"
       run: {{FORMAT_CMD}} {staged_files}
