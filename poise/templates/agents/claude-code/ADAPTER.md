@@ -8,7 +8,7 @@
 | `.claude/hooks/post_write.sh` | Runs format → lint → arch check after every file write |
 | `.claude/hooks/pre_bash.sh` | Blocks destructive commands before execution (exit 2 = unconditional) |
 | `.claude/hooks/exit_plan_mode.sh` | Shim: `scripts/capture_plan.py` saves the approved plan as an OKF exec plan |
-| `.claude/hooks/stop_check_plans.sh` | Shim: `scripts/archive_plans.py` archives finished plans and logs them |
+| `.claude/hooks/stop_check_plans.sh` | Shim: `scripts/archive_plans.py --check` asks the agent once to commit a finished plan; the lefthook pre-commit does the move |
 | `.claude/commands/sync-docs.md` | `/project:sync-docs` — garbage collection sweep |
 | `.claude/commands/plan.md` | `/project:plan` — guided execution plan creation |
 

@@ -3,26 +3,23 @@
 # Feedback layers (fastest → slowest):
 #   post-write hook (ms) → pre-commit (s) → CI (min) → human review (h)
 
+# Jobs run in order and stop at the first failure, so plan-archive only runs
+# once every check has passed and the plan gate has seen the plan in active/.
+# Ordered `jobs` need lefthook 1.10 or newer.
 pre-commit:
-  parallel: true
-  commands:
-    # Hooks regenerate docs/**/index.md listings outside the agent's commit
-    # (plan capture, plan archiving on Stop). Refresh and stage them on every
-    # commit so a listing change never lingers as an unstaged edit.
-    docs-index:
-      run: python3 scripts/check_okf.py --stage
-
-    format:
+  piped: true
+  jobs:
+    - name: format
       glob: "{{SOURCE_GLOB}}"
       run: {{FORMAT_CMD}} {staged_files}
       stage_fixed: true
 
-    lint:
+    - name: lint
       glob: "{{SOURCE_GLOB}}"
       run: {{LINT_CMD}} {staged_files}
       stage_fixed: true
 
-    architecture:
+    - name: architecture
       glob: "{{SOURCE_GLOB}}"
       run: {{CHECK_ARCH_CMD}} {staged_files}
       fail_text: |
@@ -30,7 +27,7 @@ pre-commit:
         Read the REMEDIATION instruction above and fix the import.
         Do not bypass this check.
 
-    style:
+    - name: style
       glob: "{{SOURCE_GLOB}}"
       run: {{CHECK_STYLE_CMD}} {staged_files}
       fail_text: |
@@ -42,12 +39,18 @@ pre-commit:
     # changes more than two source files with no execution plan in
     # docs/exec-plans/active/. This is the guaranteed gate for agents without
     # an edit-time hook (e.g. Codex). Disable with POISE_GATE=0.
-    plan-gate:
+    - name: plan-gate
       run: python3 scripts/require_plan.py --staged
       fail_text: |
         Plan gate: this commit changes more than two source files with no
         execution plan. Create docs/exec-plans/active/<slug>.md first, then
         commit. Disable with POISE_GATE=0.
+
+    # A finished plan moves to completed/ in the commit that finishes it. The
+    # move, the log entry, every plan edit and the index listings are staged
+    # together, so a commit never links to a plan it does not contain.
+    - name: plan-archive
+      run: python3 scripts/archive_plans.py --stage
 
 pre-push:
   commands:

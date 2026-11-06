@@ -125,23 +125,19 @@ test('cancelled gate blocks, cancelled checks report failure, verbose output is 
   assert.match(text(result), /truncated/);
 });
 
-test('end-of-run archives only finished plans, never overwrites, and never forces a continuation', async (t) => {
+test('end-of-run names finished plans, moves nothing, and never forces a continuation', async (t) => {
   const f = await fixture(t);
   await f.put('docs/exec-plans/active/done.md', '# Done\n- [x] done\n');
   await f.put('docs/exec-plans/active/unfinished.md', '# Pending\n- [x] done\n- [ ] next\n');
   await f.put('docs/exec-plans/active/empty.md', '# Draft\n');
-  await f.put('docs/exec-plans/active/collision.md', '# New\n- [x] done\n');
-  await f.put('docs/exec-plans/completed/collision.md', '# Historical\n');
   assert.equal(await f.handlers.get('agent_before_settle')(settle('aborted'), f.ctx), undefined);
   const result = await f.handlers.get('agent_before_settle')(settle(), f.ctx);
   assert.equal(result.continue, undefined);
-  assert.match(result.entries[0].content, /archived completed plan/);
-  assert.match(result.entries[0].content, /both plans were preserved/);
-  assert.equal(await readFile(join(f.root, 'docs/exec-plans/completed/collision.md'), 'utf8'), '# Historical\n');
-  for (const name of ['unfinished', 'empty', 'collision']) {
+  assert.match(result.entries[0].content, /active\/done.md has every box ticked/);
+  assert.doesNotMatch(result.entries[0].content, /unfinished.md|empty.md/);
+  for (const name of ['done', 'unfinished', 'empty']) {
     assert.ok(await readFile(join(f.root, `docs/exec-plans/active/${name}.md`), 'utf8'));
   }
-  await assert.rejects(readFile(join(f.root, 'docs/exec-plans/active/done.md')), { code: 'ENOENT' });
 });
 
 test('docs nudge is model-visible but advisory, and escape hatches are honored', async (t) => {

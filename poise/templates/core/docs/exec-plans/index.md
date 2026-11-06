@@ -47,9 +47,10 @@ Steps are short top-level `- [ ]` lines with indented `files:` and
 
 ## Completing a plan
 
-Tick every `- [ ]` step. The agent hook (`scripts/archive_plans.py`) then
-moves the file to `completed/`, sets `status: stable` and `completed_at`, and
-adds an entry to `log.md`. Update `docs/quality.md` if the plan addressed
+Tick every `- [ ]` step before you commit. The pre-commit hook
+(`scripts/archive_plans.py --stage`) then moves the file to `completed/`, sets
+`status: stable` and `completed_at`, and adds an entry to `log.md`, all in that
+commit. Update `docs/quality.md` if the plan addressed
 known debt.
 
 <!-- okf:listing -->
