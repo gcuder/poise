@@ -2,23 +2,29 @@
 """
 Archive fully checked plans for {{REPO_NAME}} without overwriting history.
 
-Shared by every agent adapter (Claude Code Stop hook, Pi agent_before_settle).
 A plan whose checkboxes are all `- [x]` moves from docs/exec-plans/active/ to
 docs/exec-plans/completed/, its OKF frontmatter gets `status: stable` and
 `completed_at`, and docs/exec-plans/log.md gets a newest-first entry.
+
+The move has to land in a commit, so the lefthook pre-commit runs `--stage`:
+the commit that ticks the last box carries the move, the log entry and the
+index line. Agent hooks only run `--check`: they fire after the commit, where a
+move would stay uncommitted.
 
 Legacy (pre-OKF) plans are given frontmatter on the way, so a half-migrated
 repo still archives correctly. Exits 0 always.
 
 Usage:
-    python scripts/archive_plans.py              # archive finished plans
-    python scripts/archive_plans.py --min-age 5  # skip files touched <5s ago
+    python scripts/archive_plans.py          # archive finished plans
+    python scripts/archive_plans.py --stage  # pre-commit: archive, then stage docs/exec-plans and the indexes
+    python scripts/archive_plans.py --check  # name finished plans waiting for a commit, move nothing
 """
+
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,15 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import _okf  # noqa: E402
 import _plans  # noqa: E402
-
-
-def _min_age() -> float:
-    if "--min-age" in sys.argv:
-        try:
-            return float(sys.argv[sys.argv.index("--min-age") + 1])
-        except (IndexError, ValueError):
-            pass
-    return 0.0
+import check_okf  # noqa: E402
 
 
 def completed_text(path: Path) -> str:
@@ -74,24 +72,21 @@ def append_log(plans_dir: Path, title: str, name: str) -> None:
         pass
 
 
-def main() -> int:
-    os.environ["CLAUDE_PROJECT_DIR"] = str(ROOT)
-    plans_dir = ROOT / "docs/exec-plans"
-    completed = plans_dir / "completed"
-    min_age = _min_age()
-    archived = False
+def finished_plans() -> list[Path]:
+    """Active plans with every box ticked. Empty and prose-only plans never count."""
+    finished = []
     for path in _plans.iter_active_plans():
-        if path.is_symlink():
-            continue
-        try:
-            if time.time() - path.stat().st_mtime < min_age:
-                continue
-        except OSError:
-            continue
         info = _plans.parse_plan(path)
-        # Empty plans and prose-only drafts must not be silently archived.
-        if not info["checked"] or info["unchecked"]:
-            continue
+        if not path.is_symlink() and info["checked"] and not info["unchecked"]:
+            finished.append(path)
+    return finished
+
+
+def archive(plans_dir: Path) -> None:
+    completed = plans_dir / "completed"
+    archived = False
+    for path in finished_plans():
+        info = _plans.parse_plan(path)
         target = completed / path.name
         try:
             completed.mkdir(parents=True, exist_ok=True)
@@ -104,17 +99,50 @@ def main() -> int:
             archived = True
             print(f"POISE: archived completed plan to docs/exec-plans/completed/{path.name}")
         except FileExistsError:
-            print(f"POISE: {target.name} already exists in completed/. "
-                  "REMEDIATION: choose a unique plan filename and archive manually; both plans were preserved.")
+            print(
+                f"POISE: {target.name} already exists in completed/. "
+                "REMEDIATION: choose a unique plan filename and archive manually; both plans were preserved."
+            )
         except OSError as error:
-            print(f"POISE: could not archive {path.name}: {error}. "
-                  "REMEDIATION: move the completed plan manually without overwriting history.")
+            print(
+                f"POISE: could not archive {path.name}: {error}. "
+                "REMEDIATION: move the completed plan manually without overwriting history."
+            )
     if archived:
         try:
-            import check_okf
             check_okf.write_indexes(only_existing=True)
         except Exception:  # never fail the hook over an index refresh
             pass
+
+
+def stage(plans_dir: Path) -> None:
+    """Stage all plans with the listings, so a commit never links to a plan it lacks."""
+    archive(plans_dir)
+    check_okf.stage_indexes()
+    subprocess.run(["git", "add", "--", str(plans_dir)], cwd=ROOT, check=False)
+
+
+def check() -> None:
+    for path in finished_plans():
+        print(
+            f"POISE: docs/exec-plans/active/{path.name} has every box ticked and has not moved to completed/. "
+            "REMEDIATION: commit it now, on a branch if you are on the default branch. "
+            "The pre-commit hook moves it to completed/ in that commit."
+        )
+
+
+def main() -> int:
+    os.environ["CLAUDE_PROJECT_DIR"] = str(ROOT)
+    plans_dir = ROOT / "docs/exec-plans"
+    try:
+        if "--check" in sys.argv:
+            check()
+        elif "--stage" in sys.argv:
+            stage(plans_dir)
+        else:
+            archive(plans_dir)
+    except Exception as error:  # a broken plan file must not stop a commit or a hook
+        print(f"POISE: plan archiving skipped: {error}. REMEDIATION: fix the plan file, then commit again.")
     return 0
 
 

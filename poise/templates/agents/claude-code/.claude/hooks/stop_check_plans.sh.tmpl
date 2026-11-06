@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # .claude/hooks/stop_check_plans.sh — {{REPO_NAME}}
 #
-# Stop hook: when all checkboxes in an active plan are ticked, move it to
-# docs/exec-plans/completed/ (status: stable, completed_at) and log it in
-# docs/exec-plans/log.md. Logic lives in scripts/archive_plans.py, shared with
-# the other adapters.
+# Stop hook: a plan with every box ticked needs a commit, because the lefthook
+# pre-commit moves it to docs/exec-plans/completed/ in that commit. Moving it
+# here would leave the move uncommitted after the turn.
 #
-# Stop fires every turn — the script is idempotent and silent on no-op.
-# --min-age 5 skips files touched within the last 5s to avoid racing with
-# the ExitPlanMode hook that just wrote the active plan.
+# Exit 2 sends the message to the agent and keeps the turn open. Exit 0 output
+# never reaches the agent. stop_hook_active is true on the turn this hook
+# reopened, so the agent is asked once and can never loop.
+
+INPUT=$(cat)
+case "$INPUT" in
+  *'"stop_hook_active":true'* | *'"stop_hook_active": true'*) exit 0 ;;
+esac
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-python3 "$PROJECT_DIR/scripts/archive_plans.py" --min-age 5 || true
+OUT=$(python3 "$PROJECT_DIR/scripts/archive_plans.py" --check </dev/null) || exit 0
+if [ -n "$OUT" ]; then
+  echo "$OUT" >&2
+  exit 2
+fi
 exit 0

@@ -33,7 +33,7 @@ export async function fixture(t, values = {}, transform = (source) => source) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), content);
   };
-  for (const name of ['_plans.py', '_okf.py', 'check_okf.py', 'archive_plans.py', 'session_brief.py', 'require_plan.py', 'nudge_plan.py', 'nudge_docs.py']) {
+  for (const name of ['_plans.py', '_okf.py', 'check_okf.py', 'archive_plans.py', 'gc_static.py', 'session_brief.py', 'require_plan.py', 'nudge_plan.py', 'nudge_docs.py']) {
     await put(`scripts/${name}`, await render(join(repo, `poise/templates/core/scripts/${name}.tmpl`), { REPO_NAME: 'fixture' }));
   }
   const common = { REPO_NAME: 'fixture' };

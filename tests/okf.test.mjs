@@ -237,21 +237,59 @@ test('index regeneration keeps the hand-written intro above the listing marker',
   assert.doesNotMatch(index, /stale listing/);
 });
 
-test('pre-commit staging picks up index listings that hooks rewrote after the last commit', async (t) => {
+test('the commit that ticks the last box carries the move, the log entry and the index line', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('docs/exec-plans/active/done.md', '---\ntype: Exec Plan\ntitle: Done\nstatus: draft\n---\n\n# Done\n- [ ] step\n');
+  w.py(['scripts/check_okf.py', '--write-index']);
+  w.git('add', '-A');
+  w.git('commit', '-qm', 'docs');
+  await w.put('docs/exec-plans/active/done.md', '---\ntype: Exec Plan\ntitle: Done\nstatus: draft\n---\n\n# Done\n- [x] step\n');
+  const result = w.py(['scripts/archive_plans.py', '--stage']);
+  assert.equal(result.status, 0, result.stderr);
+  const staged = w.git('diff', '--cached', '--name-status', '--no-renames').stdout;
+  assert.match(staged, /D\tdocs\/exec-plans\/active\/done.md/);
+  assert.match(staged, /A\tdocs\/exec-plans\/completed\/done.md/);
+  assert.match(staged, /M\tdocs\/exec-plans\/index.md/);
+  assert.match(staged, /A\tdocs\/exec-plans\/log.md|M\tdocs\/exec-plans\/log.md/);
+  assert.equal(w.git('diff', '--name-only').stdout, '');
+  assert.equal(w.git('ls-files', '--others', '--exclude-standard', 'docs/exec-plans').stdout, '');
+});
+
+test('staging picks up a plan move left uncommitted, so the index never links to a missing file', async (t) => {
   const w = await workspace(t);
   await freshBundle(w);
   w.py(['scripts/check_okf.py', '--write-index']);
   w.git('add', '-A');
   w.git('commit', '-qm', 'docs');
-  // A plan appears outside the agent's commit (e.g. archived by the Stop hook).
-  await w.put('docs/exec-plans/completed/done.md', '---\ntype: Exec Plan\ntitle: Done\ndescription: Finished.\nstatus: stable\n---\n\n# Done\n');
-  w.git('add', 'docs/exec-plans/completed/done.md');
-  const result = w.py(['scripts/check_okf.py', '--stage']);
-  assert.equal(result.status, 0, result.stderr);
+  await w.put('docs/exec-plans/completed/left.md', '---\ntype: Exec Plan\ntitle: Left\nstatus: stable\n---\n\n# Left\n');
+  w.py(['scripts/archive_plans.py', '--stage']);
   const staged = w.git('diff', '--cached', '--name-only').stdout;
+  assert.match(staged, /docs\/exec-plans\/completed\/left.md/);
   assert.match(staged, /docs\/exec-plans\/index.md/);
-  assert.equal(w.git('diff', '--name-only').stdout, '');
-  assert.match(await w.read('docs/exec-plans/index.md'), /- \[Done\]\(completed\/done.md\) — Finished./);
+});
+
+test('archiving never overwrites a completed plan with the same name', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('docs/exec-plans/active/same.md', '# New\n- [x] done\n');
+  await w.put('docs/exec-plans/completed/same.md', '# Historical\n');
+  const result = w.py(['scripts/archive_plans.py']);
+  assert.match(result.stdout, /both plans were preserved/);
+  assert.equal(await w.read('docs/exec-plans/completed/same.md'), '# Historical\n');
+  assert.ok(await w.read('docs/exec-plans/active/same.md'));
+});
+
+test('--check names a finished plan and moves nothing', async (t) => {
+  const w = await workspace(t);
+  await freshBundle(w);
+  await w.put('docs/exec-plans/active/done.md', '---\ntype: Exec Plan\ntitle: Done\n---\n\n# Done\n- [x] step\n');
+  await w.put('docs/exec-plans/active/open.md', '---\ntype: Exec Plan\ntitle: Open\n---\n\n# Open\n- [x] a\n- [ ] b\n');
+  const result = w.py(['scripts/archive_plans.py', '--check']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /active\/done.md has every box ticked/);
+  assert.doesNotMatch(result.stdout, /open.md/);
+  assert.ok(await w.read('docs/exec-plans/active/done.md'));
 });
 
 test('index listings skip dotfiles such as gitignored gc reports', async (t) => {
@@ -264,19 +302,19 @@ test('index listings skip dotfiles such as gitignored gc reports', async (t) => 
   assert.equal(after.status, 0, after.stdout);
 });
 
-test('session brief lists findings from the newest gc report only', async (t) => {
+test('session brief reports live findings, not a saved gc report', async (t) => {
   const w = await workspace(t);
-  await w.put('docs/.gc-report-20261001.md', '## OKF conformance\n- OLD_FINDING: docs/a.md\n');
-  await w.put('docs/.gc-report-20261021.md', '## Stale plans (mtime)\n- (none)\n\n## OKF conformance\n- OKF_INDEX_STALE: docs/exec-plans/index.md\n\nTotal findings: 1\n');
-  const startup = w.py(['scripts/session_brief.py'], {});
-  assert.equal(startup.status, 0, startup.stderr);
-  assert.match(startup.stdout, /Doc-gardening findings \(1, from docs\/.gc-report-20261021.md\)/);
-  assert.match(startup.stdout, /- OKF_INDEX_STALE: docs\/exec-plans\/index.md/);
-  assert.doesNotMatch(startup.stdout, /OLD_FINDING|\(none\)/);
-
-  await w.put('docs/.gc-report-20261022.md', '## OKF conformance\n- (none)\n\nTotal findings: 0\n');
+  await freshBundle(w);
+  w.py(['scripts/check_okf.py', '--write-index']);
+  await w.put('docs/.gc-report-20261021.md', '## OKF conformance\n- OLD_FINDING: docs/a.md\n');
   const clean = w.py(['scripts/session_brief.py']);
-  assert.doesNotMatch(clean.stdout, /Doc-gardening/);
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.doesNotMatch(clean.stdout, /Doc-gardening|OLD_FINDING/);
+
+  await w.put('docs/exec-plans/active/done.md', '---\ntype: Exec Plan\ntitle: Done\n---\n\n# Done\n- [x] step\n');
+  const found = w.py(['scripts/session_brief.py']);
+  assert.match(found.stdout, /Doc-gardening findings \(\d+\)/);
+  assert.match(found.stdout, /PLAN_COMPLETE: docs\/exec-plans\/active\/done.md/);
 });
 
 async function legacyTree(w) {

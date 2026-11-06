@@ -104,7 +104,7 @@ scripts/
 ├── nudge_plan.py               # directive plan reminder + re-surfaces active plan
 ├── nudge_docs.py               # docs-update reminder for wide-touching sessions
 ├── check_okf.py                # OKF conformance check + index.md generator
-├── archive_plans.py            # finished plans → completed/ + log.md
+├── archive_plans.py            # pre-commit: finished plans → completed/ + log.md
 ├── capture_plan.py             # approved plan-mode plan → active/ (OKF)
 └── migrate_okf.py              # upgrade pre-OKF docs in place (dry run by default)
 tests/

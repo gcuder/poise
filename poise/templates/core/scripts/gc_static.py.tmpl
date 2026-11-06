@@ -98,10 +98,9 @@ def check_broken_links() -> list[str]:
     return findings
 
 
-def main() -> int:
-    fail_on_any = "--fail-on-any" in sys.argv
-
-    sections = [
+def all_sections() -> list[tuple[str, list[str]]]:
+    """Every check, as (section title, findings). Also read by session_brief.py."""
+    return [
         ("Completed plans (move to completed/)", check_fully_ticked_plans()),
         ("Stale plans (mtime)",                  check_stale_plans()),
         ("Stale knowledge (stale_after)",        check_okf.stale_findings(DOCS)),
@@ -109,6 +108,12 @@ def main() -> int:
                                                  + check_okf.index_findings(DOCS)),
         ("Broken doc links (advisory)",          check_broken_links()),
     ]
+
+
+def main() -> int:
+    fail_on_any = "--fail-on-any" in sys.argv
+
+    sections = all_sections()
 
     total = sum(len(findings) for _, findings in sections)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

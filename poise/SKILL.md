@@ -291,12 +291,12 @@ Copy as-is — agent-agnostic, standard library only. Only `{{REPO_NAME}}` to fi
 - `check_okf.py` — advisory conformance check (`make check-docs`); exit 0
   unless `--fail-on-any`. `--write-index` regenerates every `index.md`
   listing below its `<!-- okf:listing -->` marker (`make docs-index`).
-  `--stage` refreshes the listings and `git add`s them; the lefthook
-  `docs-index` pre-commit command runs it so index changes made by hooks are
-  never left unstaged.
 - `archive_plans.py` — moves fully ticked plans to `completed/`, sets
   `status: stable` + `completed_at`, appends to `docs/exec-plans/log.md`.
-  Never overwrites history. Called by the Claude Code Stop hook and Pi.
+  Never overwrites history. `--stage` is the last lefthook pre-commit job: it
+  archives, then stages `docs/exec-plans/` and the index listings, so the move
+  lands in the commit that finishes the plan. `--check` moves nothing and names
+  finished plans; the Claude Code Stop hook and Pi use it to ask for a commit.
 - `capture_plan.py` — saves an approved plan-mode plan as an OKF exec plan
   (`status: draft`, `verified` by `human:<git user.email>`), then names any
   missing required section and any unresolved open question (advisory).
@@ -339,8 +339,9 @@ Use: `templates/core/lefthook.yml.tmpl`
 Adapt format/lint commands to `LANGUAGE`. The `plan-gate` pre-commit command
 (`python3 scripts/require_plan.py --staged`) is the agent-agnostic backstop for
 the plan gate — keep it (it covers agents without an edit-time hook, e.g. Codex).
-Keep the `docs-index` pre-commit command too: hooks rewrite `index.md` listings
-outside the agent's commit, and this stages them on the next commit.
+Keep the `plan-archive` job last: it moves finished plans in the commit that
+finishes them and stages them with their `index.md` listings. Jobs run in order,
+so it only runs after every check has passed.
 
 #### docs/index.md
 Use: `templates/core/docs/index.md.tmpl`. The bundle root; carries
@@ -409,7 +410,7 @@ Files:
 - `.claude/hooks/pre_write_plan_gate.sh` — plan gate via `require_plan.py` (PreToolUse on Write/Edit/MultiEdit)
 - `.claude/hooks/exit_plan_mode.sh` — shim for `capture_plan.py`: approved plan → `docs/exec-plans/active/` with OKF frontmatter (PostToolUse on ExitPlanMode)
 - `.claude/hooks/user_prompt_submit.sh` — plan directive + active-plan re-surface via `nudge_plan.py` (UserPromptSubmit)
-- `.claude/hooks/stop_check_plans.sh` — shim for `archive_plans.py`: fully-checked plans → `docs/exec-plans/completed/` (Stop)
+- `.claude/hooks/stop_check_plans.sh` — shim for `archive_plans.py --check`: asks the agent once to commit a fully checked plan (Stop)
 - `.claude/hooks/stop_nudge.sh` — docs-update nudge via `nudge_docs.py` (Stop)
 - `.claude/commands/sync-docs.md` — garbage collection sweep
 - `.claude/commands/plan.md` — manual fallback when plan mode isn't used
@@ -472,8 +473,8 @@ Generate if `AGENTS` includes Pi.
 Source directory: `templates/agents/pi/`. Read its `ADAPTER.md` before generating.
 
 Files:
-- `.pi/extensions/harness.ts` — native Pi lifecycle/tool hooks; archives
-  finished plans through the core `scripts/archive_plans.py`
+- `.pi/extensions/harness.ts` — native Pi lifecycle/tool hooks; names finished
+  plans that need a commit through the core `scripts/archive_plans.py --check`
 - `.pi/prompts/plan.md` — `/plan <task>` execution-plan creation
 - `.pi/prompts/sync-docs.md` — `/sync-docs` read-only drift audit
 
@@ -549,8 +550,13 @@ Add gc-report ignore (make gc and lefthook both write dot-prefixed reports,
 which the OKF checker skips):
   echo "docs/.gc-report-*.md" >> .gitignore
 
+Add union merges for the files most pull requests add a line to (the index is
+regenerated on every commit, so a union merge corrects itself):
+  echo "docs/exec-plans/log.md merge=union" >> .gitattributes
+  echo "docs/exec-plans/index.md merge=union" >> .gitattributes
+
 Commit the harness:
-  git add AGENTS.md docs/ scripts/ tests/ lefthook.yml Makefile .gitignore
+  git add AGENTS.md docs/ scripts/ tests/ lefthook.yml Makefile .gitignore .gitattributes
   # Also add the generated agent directories: .claude/, .codex/, .opencode/, .pi/.
   git commit -m "chore: add agent harness"
 
@@ -631,8 +637,10 @@ and the docs are migrated to OKF.
    templates no longer ship: `.pi/hooks/archive_plans.py`.
 4. **Makefile.** Add the `check-docs`, `docs-index` and `migrate-docs` targets,
    update the `plan` target, and change `make gc` to write
-   `docs/.gc-report-*.md`. Keep every other existing target. In
-   `lefthook.yml`, add the `docs-index` pre-commit command from the template.
+   `docs/.gc-report-*.md`. Keep every other existing target. Replace
+   the `pre-commit` block of `lefthook.yml` with the template's ordered `jobs`,
+   keeping repo-specific commands, and add the two `merge=union` lines to
+   `.gitattributes`.
 5. **AGENTS.md.** Add the `docs/index.md` row to **Start here** and the OKF
    note under **Plans**. Keep it under 100 lines.
 6. **Migrate docs.** Run `make migrate-docs` (dry run) and show the user the

@@ -87,7 +87,10 @@ exists.** Simple tasks (single file, one session): work directly. The plan gate
 **Active plans are created automatically.** When you approve a plan in Claude
 Code's plan mode, the `ExitPlanMode` hook writes it to
 `docs/exec-plans/active/<slug>.md`. When every checkbox in that plan is marked
-`- [x]`, the `Stop` hook moves it to `docs/exec-plans/completed/`. The
+`- [x]`, the pre-commit hook moves it to `docs/exec-plans/completed/` in that
+commit, with its log entry and index line, so tick the last box before you
+commit. If you tick it after the last commit, the agent's end-of-turn hook asks
+you to commit it. The
 `{{PLAN_CMD}}` command is a manual fallback for agents without plan mode.
 
 `docs/` is an OKF knowledge bundle: each doc starts with YAML frontmatter
